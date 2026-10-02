@@ -88,13 +88,13 @@ agent:
 <Current best-in-class, notable flags, and legacy tools this replaces. Note version-sensitive behavior.>
 
 ## Output formats
-<What it emits (stdout/json/jsonl/xml/grepable), the flag to get machine-readable output, and the canonical file path to save to.>
+<What it emits (stdout/json/jsonl/xml/grepable), the flag to get machine-readable output, and the canonical file path to save to. If you write a `_run.json`, `started`/`finished` are ISO-8601 UTC and `finished` >= `started`.>
 
 ## RAG / shared data / cross-skill
 <Wordlists, templates, payload libraries, prior-run artifacts it consumes; which skills feed it and which it feeds. Whether a RAG store (HackTricks, GTFOBins, PayloadsAllTheThings, CVE/exploit notes) adds value.>
 
 ## Notes / pitfalls
-<Rate-limits, false positives, destructive flags to avoid by default, auth handling.>
+<Rate-limits, false positives, destructive flags to avoid by default, auth handling. Evidence capture: if a finding (version, status code, response) is used as proof, save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can hard-verify it.>
 ```
 
 ### The six questions, mapped to the template

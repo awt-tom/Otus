@@ -116,6 +116,8 @@ As the executing agent works through a skill, it writes `out/<skill>/_run.json`.
 
 `status` ∈ `complete | partial | error`. On a hard failure (tool missing, network blocked, auth rejected, out of scope) set `status: error` and push a human-readable line to `errors[]` — this lets the reviewer **fail fast instead of retrying** something that can't succeed.
 
+`started` and `finished` are **ISO-8601 UTC** timestamps (e.g. `2026-10-01T19:12:40Z`) and `finished` must be **>= `started`** — a well-formed, non-negative run window. The reviewer may treat a malformed or inverted timestamp pair as a bad run record.
+
 ---
 
 ## 4. The `review` skill (ready to drop in)

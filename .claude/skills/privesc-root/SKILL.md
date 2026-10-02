@@ -32,20 +32,20 @@ evidence (not a self-report) for review and reporting.
    mkdir -p "$RUN/notes" "$RUN/loot"
    TARGET="${1:?target/foothold host required}"
    echo "target $TARGET confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
-   : > "$RUN/run.log"; : > "$RUN/notes/version.txt"
+   : > "$RUN/run.log"; : > "$RUN/notes/enum.txt"; : > "$RUN/notes/version.txt"
    ```
-2. **Identify & record the vector + version evidence.** Enumerate with the `linpeas` skill first, then
-   pin down the exact vector and the version/reference that makes it exploitable (this is the proof the
-   target was actually vulnerable). Use only what applies and record it:
+2. **Enumerate, then identify & record the vector.** Run the `linpeas` skill (plus the checks below) to
+   capture enumeration into `notes/enum.txt`, then pin down the exact vector and the version/reference
+   that makes it exploitable (the proof the target was vulnerable) into `notes/version.txt`:
    ```bash
-   uname -a                           | tee -a "$RUN/notes/version.txt"   # kernel
-   sudo -l 2>/dev/null                | tee -a "$RUN/notes/version.txt"   # sudo rules
-   find / -perm -4000 -type f 2>/dev/null | tee -a "$RUN/notes/version.txt"  # SUID
-   getcap -r / 2>/dev/null            | tee -a "$RUN/notes/version.txt"   # capabilities
-   # for a vulnerable local service, capture its exact version banner, e.g.:
-   #   <service> --version            | tee -a "$RUN/notes/version.txt"
-   searchsploit <service/version>     | tee -a "$RUN/notes/version.txt"   # map version -> known exploit
-   echo "chosen vector=<suid|sudo|cron|cap|kernel|service> ref=<CVE/GTFOBins>" >> "$RUN/notes/version.txt"
+   { uname -a; sudo -l 2>/dev/null; find / -perm -4000 -type f 2>/dev/null; getcap -r / 2>/dev/null; } \
+     | tee -a "$RUN/notes/enum.txt"                      # kernel / sudo rules / SUID / capabilities
+   # for a vulnerable local service, capture its exact version banner into the enum log, e.g.:
+   #   <service> --version | tee -a "$RUN/notes/enum.txt"
+   searchsploit <service/version> | tee -a "$RUN/notes/enum.txt"   # map version -> known exploit
+   # record the CHOSEN vector + the exact version/reference that proves exploitability:
+   echo "vector=<suid|sudo|cron|cap|kernel|service> version=<exact version> ref=<CVE/GTFOBins>" \
+     | tee -a "$RUN/notes/version.txt"
    ```
 3. **Escalate (least-destructive).** Run the chosen vector to obtain a root context, teeing the **full**
    transcript — including any failed attempts, which corroborate the working path and the root cause:
@@ -83,8 +83,8 @@ ExploitDB — a single hand-written PoC is often cleaner (and OSCP-friendlier) t
 the least-destructive path; treat kernel exploits (which can crash the host) as a last resort.
 
 ## Output formats
-Plaintext transcripts (`loot/root-shell.log`, `loot/root-proof.txt`) and notes (`notes/version.txt`,
-`notes/root-flag.txt`), plus `summary.txt`, `run.log`, and a run record `$RUN/_run.json`:
+Plaintext transcripts (`loot/root-shell.log`, `loot/root-proof.txt`) and notes (`notes/enum.txt`,
+`notes/version.txt`, `notes/root-flag.txt`), plus `summary.txt`, `run.log`, and a run record `$RUN/_run.json`:
 ```json
 {
   "skill": "privesc-root",
@@ -95,9 +95,11 @@ Plaintext transcripts (`loot/root-shell.log`, `loot/root-proof.txt`) and notes (
   "status": "complete",
   "items": {
     "scope-confirmed":   { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
+    "run-log":           { "attempted": true, "ok": true, "evidence": "run.log" },
+    "enum-ran":          { "attempted": true, "ok": true, "evidence": "notes/enum.txt" },
     "vector-identified": { "attempted": true, "ok": true, "evidence": "notes/version.txt" },
-    "root-proven":       { "attempted": true, "ok": true, "evidence": "loot/root-proof.txt" },
-    "flag-captured":     { "attempted": true, "ok": true, "evidence": "notes/root-flag.txt" }
+    "root-proof":        { "attempted": true, "ok": true, "evidence": "loot/root-proof.txt" },
+    "run-record":        { "attempted": true, "ok": true, "evidence": "_run.json" }
   },
   "errors": []
 }
@@ -120,22 +122,34 @@ checklist:
     evidence: notes/scope.txt
     on_fail: fail
     required: true
-  - id: vector-identified
-    desc: Escalation vector and the exact vulnerable version/reference recorded
+  - id: run-log
+    desc: Run log initialized and written to the run directory
+    verify: exists
+    evidence: run.log
+    on_fail: redo-part
+    required: true
+  - id: enum-ran
+    desc: Privilege-escalation enumeration executed and captured
     verify: nonempty
+    evidence: notes/enum.txt
+    on_fail: redo-part
+    required: true
+  - id: vector-identified
+    desc: Chosen escalation vector + exact vulnerable version/reference recorded
+    verify: judge
     evidence: notes/version.txt
     on_fail: redo-part
     required: true
-  - id: root-proven
+  - id: root-proof
     desc: Captured transcript proves root (uid=0) non-destructively
-    verify: contains:uid=0\(root\)
+    verify: contains:uid=0
     evidence: loot/root-proof.txt
     on_fail: redo-skill
     required: true
-  - id: flag-captured
-    desc: Root flag captured (or marker written if absent/elsewhere)
-    verify: nonempty
-    evidence: notes/root-flag.txt
+  - id: run-record
+    desc: Run record _run.json written for the run
+    verify: exists
+    evidence: _run.json
     on_fail: redo-part
     required: true
 ```

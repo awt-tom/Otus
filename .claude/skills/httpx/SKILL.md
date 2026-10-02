@@ -134,5 +134,8 @@ checklist:
 - A run that finds nothing live must still write `summary.txt` ("no live hosts") and a clean empty
   `live.txt`, so "ran but empty" ≠ "didn't run".
 - Keep `live.txt` a clean list fed verbatim downstream — the empty marker goes in `summary.txt`.
+- **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
+  save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
+  hard-verify it.
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/httpx/<timestamp>/` (git-ignored).

@@ -166,5 +166,8 @@ checklist:
   redirect-induced DNS failure doesn't get the host flagged permanently unresponsive and skipped.
 - A scan with no hits must still leave `nuclei.txt` ("no findings") so `exists` correctly passes —
   distinguishing "ran, found nothing" from "never ran".
+- **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
+  save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
+  hard-verify it.
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/nuclei/<timestamp>/` (git-ignored).

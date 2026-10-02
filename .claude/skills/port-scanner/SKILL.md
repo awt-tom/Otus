@@ -63,7 +63,7 @@ and network-scope recon pass.
    ```
 6. **Hand-off / branch.** Summarize open services for downstream skills and write the run record:
    ```bash
-   { echo "# $target"; grep -E '/open' "$RUN/scans/detail.gnmap" 2>/dev/null || echo "no open ports"; } > "$RUN/summary.txt"
+   { echo "# $target"; grep -E '^[0-9]+/(tcp|udp)[[:space:]]+open' "$RUN/scans/detail.nmap" 2>/dev/null || echo "no open ports"; } > "$RUN/summary.txt"
    ```
    Then branch by service to per-service skills (SMB → enum4linux-ng/smbmap, HTTP(S) → httpx
    / ffuf / web skills), and feed `detail.xml` to exploit lookup (`searchsploit --nmap`).
@@ -144,5 +144,8 @@ checklist:
   it can hide that a host is actually down.
 - A step that legitimately finds nothing (no open ports) must still write a "no open ports"
   marker to both `scans/detail.nmap` and `summary.txt` so "ran but empty" ≠ "didn't run".
+- **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
+  save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
+  hard-verify it.
 - Never write scan output under `skills/`; the run directory is always anchored to the repo
   root via `git rev-parse --show-toplevel` under `out/port-scanner/<timestamp>/` (git-ignored).
