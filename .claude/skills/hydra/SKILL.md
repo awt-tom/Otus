@@ -28,7 +28,8 @@ skills.
    `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/hydra/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_hydra="${OTUS_RUN_DIR:-$ROOT/out/hydra/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_hydra"
    mkdir -p "$RUN/notes"
    TARGET="${1:?target host required}"; SERVICE="${2:?service (ssh/ftp/http-post-form/...) required}"
    echo "service $SERVICE on $TARGET confirmed in scope; lockout policy checked: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -128,5 +129,10 @@ checklist:
 - For SMB/WinRM/LDAP at scale prefer `netexec` (lockout-aware); for offline hashes use `hashcat`.
 - A run that finds nothing must still write `summary.txt` ("no valid credentials found") so "ran but
   empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/hydra/<timestamp>/` (git-ignored).

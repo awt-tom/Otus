@@ -28,7 +28,8 @@ session / post-exploitation — with the full console transcript captured for th
    Anchor a timestamped run directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/metasploit/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_metasploit="${OTUS_RUN_DIR:-$ROOT/out/metasploit/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_metasploit"
    mkdir -p "$RUN/notes"
    RHOST="${1:?target_host required}"; LHOST="${3:-<your-lhost>}"
    echo "target $RHOST confirmed in scope; LHOST=$LHOST: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -134,5 +135,10 @@ checklist:
 - For OSCP-style manual work, prefer single `searchsploit`/GitHub exploits over the framework.
 - A run that opens no session must still write `summary.txt` ("no session …") and
   `notes/modules.txt` so "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/metasploit/<timestamp>/` (git-ignored).

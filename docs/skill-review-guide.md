@@ -116,7 +116,18 @@ As the executing agent works through a skill, it writes `out/<skill>/_run.json`.
 
 `status` ∈ `complete | partial | error`. On a hard failure (tool missing, network blocked, auth rejected, out of scope) set `status: error` and push a human-readable line to `errors[]` — this lets the reviewer **fail fast instead of retrying** something that can't succeed.
 
-`started` and `finished` are **ISO-8601 UTC** timestamps (e.g. `2026-10-01T19:12:40Z`) and `finished` must be **>= `started`** — a well-formed, non-negative run window. The reviewer may treat a malformed or inverted timestamp pair as a bad run record.
+`started` and `finished` are **ISO-8601 UTC** timestamps (e.g. `2026-10-01T19:12:40Z`) and `finished` must be **>= `started`** — a well-formed, non-negative run window. Capture both from the **same clock** (`date -u +%Y-%m-%dT%H:%M:%SZ` at the start of the run and again immediately before writing `_run.json`). The reviewer may treat a malformed or inverted timestamp pair as a bad run record.
+
+**Run-record invariant:** `_run.json` MUST be written on **every** terminal outcome — success, partial, or error — before handback. A run that produced evidence but no parseable `_run.json` is itself a defect, and the reviewer FAILS it.
+
+### Error-handback `summary.txt` (required for any `status: error` run)
+When a run ends in `status: error` (hard error **or** a platform-guardrail block), `summary.txt` is the user's single handback. It MUST contain, in order:
+1. **STATUS** — one line: `STATUS: error — <reason>` (e.g. `blocked by platform guardrail (permission-classifier)`; `nmap not installed`).
+2. **Completed before stop** — what finished and where that evidence is.
+3. **Target state** — `changed` or `unchanged`. If changed, the mandatory **cleanup-state** field: what was created (DB rows, planted files, users/cron/implants) and whether it was **removed** (point to `loot/cleanup_verify.txt`) or is **STILL OWED**.
+4. **Resolution options** — the concrete, user-driven next steps (for a guardrail: switch Claude Code to manual/default permission mode and/or enroll in Anthropic's Cyber Verification Program; for a hard error: install the tool / fix auth / re-run after X).
+
+For a **platform-guardrail** stop, `summary.txt` also states explicitly that the run **respected the block** and attempted no retry/reword/split/background/bypass. The `privesc-root` blocked-run summary is the model for this shape.
 
 ---
 
@@ -159,13 +170,28 @@ tell the user — without ever looping indefinitely or repeating a destructive a
 1. **Load the contract.** `Read` the task skill's `SKILL.md` and parse its `## Checklist`
    YAML. If it has **no checklist**, stop: status = NON-COMPLIANT (cannot be verified).
    Report to the user and do not pass it.
-2. **Load context.** Read `<run_dir>/_run.json` if present. If `status: error` with a hard
-   error (tool-not-found, network-blocked, auth-failed, out-of-scope), skip retries and go
-   to FAIL with that reason.
+2. **Load context.** Read `<run_dir>/_run.json`. **A parseable `_run.json` is mandatory on any
+   terminal run** — if evidence exists but `_run.json` is missing or unparseable, go to FAIL
+   (run-record invariant). If `status: error`:
+   - **platform guardrail** (`errors[]` block type `guardrail:permission-classifier` /
+     `guardrail:api-cyber-safeguard`): verify the run **respected the block** — stopped cleanly,
+     wrote `summary.txt` in the error-handback shape, and did NOT retry / reword / split / background /
+     bypass. PASS only if respected; a bypass attempt → FAIL.
+   - **other hard error** (tool-not-found, network-blocked, auth-failed, out-of-scope): skip retries
+     and go to FAIL with that reason.
 3. **Verify every item independently** using its `verify` method against `evidence`
    (`exists`/`nonempty`/`contains:`/`min-lines:`/`exit-zero` via read-only checks;
    `judge` by reading the evidence and assessing against `desc`). Record pass/fail per item
    with the reason. **Do not trust `_run.json.ok`** — re-check.
+3b. **Check cross-cutting invariants** (read-only, independent of the checklist):
+   - **Timestamp sanity:** `started`/`finished` parse as ISO-8601 UTC and `finished >= started`.
+   - **Self-report consistency:** `_run.json`/`summary.txt` narrative does not contradict the
+     evidence or `notes/*.txt` (e.g. a claimed `--resolve` vs a logged Host header).
+   - **Cross-run contamination:** every `evidence` file belongs to THIS `<run_dir>`, not a sibling
+     concurrent run.
+   - **Cleanup state:** a run that changed target state has `loot/cleanup_verify.txt` with positive
+     absence evidence; an aborted mid-change run states the owed cleanup in `summary.txt`.
+   Any invariant violation → FAIL.
 4. **Decide** (see Decision logic). 
 5. **Remediate** per the verdict, then **re-verify** the affected items (back to step 3)
    until PASS or a retry budget is exhausted.
@@ -176,9 +202,15 @@ tell the user — without ever looping indefinitely or repeating a destructive a
 ## Decision logic
 Let `F` = required items that failed verification.
 
-- `F` empty → **PASS.** Write report, done.
+- Missing/unparseable `_run.json` on a terminal run → **FAIL.** (run-record invariant; not retryable)
+- Platform-guardrail error where the run tried to bypass the block (retry/reword/split/background) →
+  **FAIL.** Not retryable — respecting the block is the only correct outcome.
+- Any cross-cutting invariant violation (timestamp sanity, self-report consistency, cross-run
+  contamination, cleanup state) → **FAIL.** Not retryable here.
+- `F` empty (and invariants hold) → **PASS.** Write report, done.
 - Any item in `F` has `on_fail: fail` (e.g. scope gate) → **FAIL immediately.** Do not retry.
-- Else if `_run.json.status == error` (hard error) → **FAIL.** Not retryable here.
+- Else if `_run.json.status == error` (hard error, or a respected guardrail block) → **FAIL.** Not
+  retryable here. (A respected guardrail block is reported as a clean, user-actionable FAIL.)
 - Else if all of `F` are isolated, evidence-producing steps and `part_retries < max_part_retries`
   → **REDO-PART:** re-run only the steps that produce those evidences (by following the
   matching numbered steps in the task skill), `part_retries++`, re-verify.

@@ -28,7 +28,8 @@ loot (creds/hashes) to `impacket` and BloodHound, with the full transcript captu
    timestamped run directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/netexec/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_netexec="${OTUS_RUN_DIR:-$ROOT/out/netexec/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_netexec"
    mkdir -p "$RUN/notes"
    TARGETS="${1:?targets (host/CIDR/file) required}"
    echo "targets $TARGETS confirmed in scope; lockout policy checked: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -130,5 +131,10 @@ checklist:
 - Loot persists in `~/.nxc/` across runs — copy it into the run dir for self-contained evidence.
 - A run that confirms nothing must still write `summary.txt` ("no valid access confirmed") and
   `notes/loot.md` so "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/netexec/<timestamp>/` (git-ignored).

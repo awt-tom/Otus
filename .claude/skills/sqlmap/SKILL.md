@@ -26,7 +26,8 @@ file read, shell) — pulling the **minimum** data needed and recording payloads
    repo root (never write under `skills/`); fail fast if the request file is empty:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/sqlmap/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_sqlmap="${OTUS_RUN_DIR:-$ROOT/out/sqlmap/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_sqlmap"
    mkdir -p "$RUN/notes"
    REQ="${1:?path to captured request file (-r) required}"
    [ -s "$REQ" ] || { echo "request file empty/missing: $REQ" | tee -a "$RUN/run.log"; exit 1; }
@@ -128,5 +129,10 @@ checklist:
   reviewer will not auto-retry them.
 - A run that confirms nothing must still write `summary.txt` ("no injection confirmed") and
   `notes/payloads.txt` so "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/sqlmap/<timestamp>/` (git-ignored).

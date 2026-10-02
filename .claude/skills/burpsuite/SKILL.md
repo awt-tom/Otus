@@ -29,7 +29,8 @@ evidence captured deliberately, since most of the work is manual and not reprodu
    `skills/`) for exported artifacts:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/burpsuite/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_burpsuite="${OTUS_RUN_DIR:-$ROOT/out/burpsuite/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_burpsuite"
    mkdir -p "$RUN/notes" "$RUN/requests"
    echo "target confirmed in scope + Burp scope restricted: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
    : > "$RUN/run.log"; : > "$RUN/notes/sitemap.md"; : > "$RUN/findings.md"
@@ -132,5 +133,10 @@ checklist:
   accordingly.
 - A run that finds nothing must still write `summary.txt` ("no findings recorded") and `findings.md`
   so "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/burpsuite/<timestamp>/` (git-ignored).

@@ -28,7 +28,8 @@ Identify server-side request forgery on an in-scope target, bypass any filtering
    directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/ssrf/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_ssrf="${OTUS_RUN_DIR:-$ROOT/out/ssrf/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_ssrf"
    mkdir -p "$RUN/notes"
    echo "target confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
    : > "$RUN/run.log"; : > "$RUN/notes/candidates.md"; : > "$RUN/findings.md"
@@ -123,5 +124,10 @@ checklist:
 - Keep bypass payloads in RAG (encodings, rebinding, redirects), not inline, so they stay current.
 - A run that confirms nothing must still write `summary.txt` ("no ssrf confirmed") and `findings.md`
   so "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/ssrf/<timestamp>/` (git-ignored).

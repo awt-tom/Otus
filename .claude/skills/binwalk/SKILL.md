@@ -27,7 +27,8 @@ extraction captured.
    **many** files:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/binwalk/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_binwalk="${OTUS_RUN_DIR:-$ROOT/out/binwalk/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_binwalk"
    mkdir -p "$RUN"
    TARGET="${1:?path to target file required}"
    [ -s "$TARGET" ] || { echo "file empty/missing: $TARGET" | tee -a "$RUN/run.log"; exit 1; }
@@ -127,5 +128,10 @@ checklist:
 - `--dd=<type>` carves a specific signature when `-e` misses it.
 - A run that finds nothing must still write `summary.txt` ("no embedded content detected") so "ran
   but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/binwalk/<timestamp>/` (git-ignored).

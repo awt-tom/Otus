@@ -28,7 +28,8 @@ first stage of attack-surface mapping — a clean host list ready to resolve and
    `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/subfinder/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_subfinder="${OTUS_RUN_DIR:-$ROOT/out/subfinder/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_subfinder"
    mkdir -p "$RUN/notes"
    echo "domain=$domain confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
    : > "$RUN/run.log"
@@ -132,5 +133,10 @@ checklist:
   and a clean empty `subs.txt`, so "ran but empty" ≠ "didn't run".
 - Keep `subs.txt` a pure host list — never write the empty marker into it (it is fed verbatim to
   `dnsx`/`httpx`); the marker goes in `summary.txt`.
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/subfinder/<timestamp>/` (git-ignored).

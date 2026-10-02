@@ -28,7 +28,8 @@ a calibrated, low-false-positive list of hits to drive manual and vuln-class tes
    write under `skills/`). `target_url` must contain the `FUZZ` keyword at the fuzz position:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/ffuf/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_ffuf="${OTUS_RUN_DIR:-$ROOT/out/ffuf/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_ffuf"
    mkdir -p "$RUN/notes"
    target="${1:?target_url with FUZZ keyword required}"   # e.g. https://t/FUZZ
    WORDLIST="${2:?wordlist path required}"
@@ -128,5 +129,10 @@ checklist:
 - Recursive/large wordlists can explode request volume — keep it bounded and honour rate limits.
 - A run that finds nothing must still write `summary.txt` ("no hits") so "ran but empty" ≠
   "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/ffuf/<timestamp>/` (git-ignored).

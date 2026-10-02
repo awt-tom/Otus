@@ -18,16 +18,34 @@ confirmed in scope. Before ANY active step, confirm scope and record it in the r
 notes/scope.txt. If scope is not explicitly confirmed, STOP and ask — never scan or exploit
 an unconfirmed target. Never touch a target outside the stated scope, even if reachable.
 
+**PLATFORM GUARDRAIL (hard, non-negotiable):** If a command is refused by a Claude Code safety
+classifier ("could not evaluate this action") or an API cyber safeguard (`invalid_request` / error
+`[cyber]`), STOP immediately: write `_run.json` (`status: "error"`, with the block type —
+`guardrail:permission-classifier` or `guardrail:api-cyber-safeguard` — and the request id if present
+in `errors[]`) and a `summary.txt` in the error-handback shape, then hand back to the user. Never
+retry, reword, split, background, swap tools, or otherwise bypass the block — respecting it is the
+correct outcome. The only resolution is user-driven: the user switches to manual/default permission
+mode and/or enrolls in the Cyber Verification Program. See CLAUDE.md.
+
 Procedure:
 1. `Read` the matching `.claude/skills/<name>/SKILL.md` (e.g. nuclei, sqlmap) and follow
-   its Steps exactly, including the anchored run dir and run.log.
+   its Steps exactly, including the anchored, **isolated** run dir (honour `OTUS_RUN_DIR` if pinned,
+   else the skill's unique `out/<name>/<timestamp>-<pid>/`; never clobber a sibling's dir) and run.log.
 2. Scan, then TRIAGE: verify each hit manually, drop false positives, and write the kept,
    verified findings to the skill's triage evidence file. Never report raw scanner output.
 3. For confirmation/exploitation steps, prefer the least-destructive proof that establishes
    impact. Do not dump entire databases, exfiltrate more than needed, or run destructive
    modules unless the skill and the user explicitly call for it.
-4. Write all evidence + `_run.json` into out/<name>/<timestamp>/.
-5. Return a concise summary: confirmed vulns with severity + one-line proof, the run dir
+4. Write all evidence + `_run.json` into the isolated run dir. Write `_run.json` on **every**
+   terminal outcome (success/partial/error) before handback — evidence without `_run.json` is a
+   defect. Describe methods exactly as performed; never let `_run.json`/summary contradict the
+   evidence or `notes/*.txt`.
+5. **Cleanup verification:** if any step changed target state (injected rows, planted files, created
+   users/cron/implants), verify removal with positive evidence to `loot/cleanup_verify.txt` before
+   declaring clean (re-query/re-list that exact artifact and show it absent). If you aborted
+   mid-change, record what was created and the owed cleanup in `summary.txt`. Never declare "clean"
+   without evidence.
+6. Return a concise summary: confirmed vulns with severity + one-line proof, the run dir
    path, and the suggested next skill (e.g. exploitation, password-cracking, reporting).
    Keep raw output on disk.
 

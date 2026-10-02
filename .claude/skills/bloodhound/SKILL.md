@@ -28,7 +28,8 @@ as each new identity is gained, since paths change.
    (never write under `skills/`); collect *into* it so artifacts are self-contained:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/bloodhound/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_bloodhound="${OTUS_RUN_DIR:-$ROOT/out/bloodhound/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_bloodhound"
    mkdir -p "$RUN/collection" "$RUN/notes"
    DOMAIN="${1:?domain required}"
    echo "domain $DOMAIN confirmed in scope; collection scoped to lab: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -127,5 +128,10 @@ checklist:
 - Keep Cypher queries in RAG, not hardcoded here, so the library stays current.
 - A run that finds no path must still write `summary.txt` and a `- none` line in `findings.md` so
   "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/bloodhound/<timestamp>/` (git-ignored).

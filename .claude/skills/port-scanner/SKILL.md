@@ -27,7 +27,9 @@ and network-scope recon pass.
    `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/port-scanner/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_port_scanner="${OTUS_RUN_DIR:-$ROOT/out/port-scanner/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_port_scanner"
+   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    mkdir -p "$RUN/scans" "$RUN/notes"
    echo "target=$target confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
    : > "$RUN/run.log"
@@ -85,8 +87,8 @@ record `$RUN/_run.json`:
   "skill": "port-scanner",
   "target": "<target>",
   "run_dir": "out/port-scanner/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
+  "started": "<started: date -u +%Y-%m-%dT%H:%M:%SZ, ISO-8601 UTC>",
+  "finished": "<finished: date -u at finish; must be >= started>",
   "status": "complete",
   "items": {
     "scope-confirmed": { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
@@ -147,5 +149,10 @@ checklist:
 - **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
   save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
   hard-verify it.
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write scan output under `skills/`; the run directory is always anchored to the repo
   root via `git rev-parse --show-toplevel` under `out/port-scanner/<timestamp>/` (git-ignored).

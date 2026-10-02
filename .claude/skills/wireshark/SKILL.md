@@ -25,7 +25,8 @@ files, and decode protocols — capturing the recovered data and the filters use
    directory to the repo root (never write under `skills/`) and get a protocol overview first:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/wireshark/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_wireshark="${OTUS_RUN_DIR:-$ROOT/out/wireshark/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_wireshark"
    mkdir -p "$RUN/objects" "$RUN/notes"
    PCAP="${1:?path to pcap required}"
    [ -s "$PCAP" ] || { echo "pcap empty/missing: $PCAP" | tee -a "$RUN/run.log"; exit 1; }
@@ -127,5 +128,10 @@ checklist:
 - Follow TCP/UDP streams to read creds/commands in order; a single-packet view misses the exchange.
 - A run that extracts nothing must still write `summary.txt` ("no artifacts extracted") and a
   `- none` line in `findings.md` so "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/wireshark/<timestamp>/` (git-ignored).

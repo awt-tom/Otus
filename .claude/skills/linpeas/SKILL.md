@@ -27,7 +27,8 @@ concrete, verified escalation path.
    output pulled back from the target:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/linpeas/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_linpeas="${OTUS_RUN_DIR:-$ROOT/out/linpeas/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_linpeas"
    mkdir -p "$RUN/notes"
    echo "foothold host confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
    : > "$RUN/run.log"; : > "$RUN/notes/vectors.md"
@@ -125,5 +126,10 @@ checklist:
 - `pspy` catches root cron/processes that a one-shot linpeas run can miss.
 - A run that finds no vector must still write `summary.txt` and a `- none` line in `vectors.md` so
   "ran but empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/linpeas/<timestamp>/` (git-ignored).

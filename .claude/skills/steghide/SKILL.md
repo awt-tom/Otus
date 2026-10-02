@@ -26,7 +26,8 @@ cracking it with stegseek + a wordlist — and capture the extracted payload for
    is readable without a passphrase):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/steghide/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_steghide="${OTUS_RUN_DIR:-$ROOT/out/steghide/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_steghide"
    mkdir -p "$RUN"
    SF="${1:?path to stego file required}"
    [ -s "$SF" ] || { echo "stego file empty/missing: $SF" | tee -a "$RUN/run.log"; exit 1; }
@@ -127,5 +128,10 @@ checklist:
 - Always `file`/`strings` the extracted payload — it may itself be another container to carve.
 - A run that extracts nothing must still write `summary.txt` ("no payload extracted") so "ran but
   empty" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/steghide/<timestamp>/` (git-ignored).

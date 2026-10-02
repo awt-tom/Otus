@@ -28,7 +28,9 @@ evidence (not a self-report) for review and reporting.
    timestamped run directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/privesc-root/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_privesc_root="${OTUS_RUN_DIR:-$ROOT/out/privesc-root/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_privesc_root"
+   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    mkdir -p "$RUN/notes" "$RUN/loot"
    TARGET="${1:?target/foothold host required}"
    echo "target $TARGET confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -90,8 +92,8 @@ Plaintext transcripts (`loot/root-shell.log`, `loot/root-proof.txt`) and notes (
   "skill": "privesc-root",
   "target": "<target/foothold host>",
   "run_dir": "out/privesc-root/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
+  "started": "<started: date -u +%Y-%m-%dT%H:%M:%SZ, ISO-8601 UTC>",
+  "finished": "<finished: date -u at finish; must be >= started>",
   "status": "complete",
   "items": {
     "scope-confirmed":   { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
@@ -167,5 +169,13 @@ checklist:
   last resort in labs; avoid in sensitive environments.
 - A run that proves root but finds no `/root/root.txt` must still write the `notes/root-flag.txt`
   marker so "ran, proved root" ≠ "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
+- **Cleanup verification:** if you planted any artifact on the target (file, user, cron, implant),
+  verify its removal with positive evidence to `loot/cleanup_verify.txt` before declaring clean; on an
+  aborted run, record the owed cleanup in `summary.txt`.
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/privesc-root/<timestamp>/` (git-ignored).

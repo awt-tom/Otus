@@ -78,23 +78,27 @@ agent:
 <What a successful run produces and why you'd reach for this. 1–2 sentences.>
 
 ## Steps
-1. <precondition / input check>
+1. <precondition / input check>. Anchor an **isolated** run dir and capture the start time from one clock: `ROOT="$(git rev-parse --show-toplevel)"`; `OTUS_RUN_<name>="${OTUS_RUN_DIR:-$ROOT/out/<name>/$(date -u +%Y%m%dT%H%M%SZ)-$$}"`; `RUN="$OTUS_RUN_<name>"`; `started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"`. Never share a bare `$RUN` a parallel subagent could overwrite.
 2. <exact command form, e.g. `nuclei -l live.txt -severity critical,high -o nuclei.txt`>
 3. <decision point: if X then …, else …>
 4. <verification / triage of results>
-5. <hand-off: write outputs to ./out/<name>/ and name the next skill to chain>
+5. <hand-off: write outputs to `$RUN/` and name the next skill to chain>. Capture `finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"` and write `_run.json` on **every** terminal outcome (success/partial/error) before handback.
 
 ## Modern tooling & alternatives
 <Current best-in-class, notable flags, and legacy tools this replaces. Note version-sensitive behavior.>
 
 ## Output formats
-<What it emits (stdout/json/jsonl/xml/grepable), the flag to get machine-readable output, and the canonical file path to save to. If you write a `_run.json`, `started`/`finished` are ISO-8601 UTC and `finished` >= `started`.>
+<What it emits (stdout/json/jsonl/xml/grepable), the flag to get machine-readable output, and the canonical file path to save to. If you write a `_run.json`, `started`/`finished` are ISO-8601 UTC captured from the same clock and `finished` >= `started`.>
 
 ## RAG / shared data / cross-skill
 <Wordlists, templates, payload libraries, prior-run artifacts it consumes; which skills feed it and which it feeds. Whether a RAG store (HackTricks, GTFOBins, PayloadsAllTheThings, CVE/exploit notes) adds value.>
 
 ## Notes / pitfalls
 <Rate-limits, false positives, destructive flags to avoid by default, auth handling. Evidence capture: if a finding (version, status code, response) is used as proof, save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can hard-verify it.>
+- **Platform guardrail (hard):** if a step is refused by a Claude Code safety classifier ("could not evaluate this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the block (see CLAUDE.md).
+- **Run-record invariant:** `_run.json` is written on every terminal outcome before handback; evidence without a parseable `_run.json` is a defect.
+- **Self-report consistency:** `_run.json`/`summary.txt` must describe the method exactly as performed and never contradict the on-disk evidence or `notes/*.txt`.
+- **Cleanup verification:** declare "no cleanup needed" only if nothing on the target was changed; if you created any artifact, verify its removal with positive evidence in `loot/cleanup_verify.txt` before declaring clean (error/aborted runs record the owed cleanup in `summary.txt`).
 ```
 
 ### The six questions, mapped to the template

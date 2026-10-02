@@ -27,7 +27,8 @@ flag.
    mitigations (`checksec` → RELRO/NX/PIE/canary) — they dictate the technique:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/pwntools/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_pwntools="${OTUS_RUN_DIR:-$ROOT/out/pwntools/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_pwntools"
    mkdir -p "$RUN/notes"
    BIN="${1:?path to target binary required}"
    echo "binary/endpoint confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -130,5 +131,10 @@ checklist:
 - `checksec` first — mitigations (NX/PIE/canary/RELRO) decide the whole approach.
 - A run without a flag yet must still write `summary.txt` ("in progress") so "ran but empty" ≠
   "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/pwntools/<timestamp>/` (git-ignored).

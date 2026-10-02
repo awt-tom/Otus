@@ -26,7 +26,8 @@ the exploit or solve step.
    directory to the repo root (never write under `skills/`) and do quick triage first:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/ghidra/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_ghidra="${OTUS_RUN_DIR:-$ROOT/out/ghidra/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_ghidra"
    mkdir -p "$RUN/project" "$RUN/notes"
    BIN="${1:?path to target binary required}"
    echo "binary confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -127,5 +128,10 @@ checklist:
 - Hand the recovered constraints to `z3`/`pwntools` rather than solving by hand.
 - A run with no conclusion yet must still write `summary.txt` ("in progress") so "ran but empty" ≠
   "didn't run".
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/ghidra/<timestamp>/` (git-ignored).

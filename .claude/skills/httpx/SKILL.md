@@ -30,7 +30,9 @@ before crawling and scanning.
    repo root (never write under `skills/`), and fail fast if the input list is missing/empty:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   RUN="$ROOT/out/httpx/$(date +%Y%m%dT%H%M%S)"
+   OTUS_RUN_httpx="${OTUS_RUN_DIR:-$ROOT/out/httpx/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   RUN="$OTUS_RUN_httpx"
+   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    mkdir -p "$RUN/notes"
    HOSTS="${1:?path to host list required}"
    [ -s "$HOSTS" ] || { echo "input host list empty/missing: $HOSTS" | tee -a "$RUN/run.log"; exit 1; }
@@ -77,8 +79,8 @@ executor also writes a run record `$RUN/_run.json`:
   "skill": "httpx",
   "target": "<hosts-list>",
   "run_dir": "out/httpx/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
+  "started": "<started: date -u +%Y-%m-%dT%H:%M:%SZ, ISO-8601 UTC>",
+  "finished": "<finished: date -u at finish; must be >= started>",
   "status": "complete",
   "items": {
     "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
@@ -137,5 +139,10 @@ checklist:
 - **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
   save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
   hard-verify it.
+- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
+  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
+  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
+  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
   `git rev-parse --show-toplevel` under `out/httpx/<timestamp>/` (git-ignored).
