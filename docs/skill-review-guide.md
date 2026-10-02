@@ -1,6 +1,6 @@
-# Skill Verification & Review — Checklist Spec + `review` Skill
+# Skill Review Guide — Checklist Spec + `review` Skill
 
-> **Companion to** `kali-bugbounty-ctf-skills-reference.md`. This adds a verification layer:
+> **Companion to** `skill-generator-guide.md`. This adds a verification layer:
 > 1. A **`## Checklist` block** every skill carries — it declares each required part *and how to verify it from evidence*.
 > 2. A **run record** the executing agent writes as it works.
 > 3. A **separate `review` skill** that independently re-checks the evidence and then **redoes the missing part**, **redoes the whole skill**, or **tells the user it failed** — with bounded retries so it can't loop forever.
@@ -120,7 +120,7 @@ As the executing agent works through a skill, it writes `out/<skill>/_run.json`.
 
 ## 4. The `review` skill (ready to drop in)
 
-Create `skills/_meta/review/SKILL.md`:
+Create `.claude/skills/review/SKILL.md`:
 
 ```markdown
 ---
@@ -132,7 +132,7 @@ description: >
   reports failure to the user. Trigger with "review", "verify", "did it finish",
   "check the <skill> run".
 arguments: "skill_name run_dir [max_part_retries] [max_skill_retries]"
-model: default
+model: inherit
 effort: high
 context: fork
 agent: general-purpose
@@ -289,7 +289,7 @@ Chain example from the reference: after `subfinder → httpx → nuclei`, call `
 2. **Every task skill:** write `out/<skill>/_run.json` as it executes (§3 here), and make any "might produce nothing" step write a marker file so absence ≠ emptiness.
 3. **Directory layout (§8 of reference):** add
    ```
-   skills/_meta/review/SKILL.md
+   .claude/skills/review/SKILL.md
    out/<skill>/_run.json        # per-run record
    out/<skill>/_review.md       # per-run review report
    ```

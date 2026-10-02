@@ -4,9 +4,9 @@ description: >
   Use when scanning a host for open TCP ports, services, and versions with nmap
   (port scan, service/version detection, NSE scripts). The backbone recon step for
   HTB/OSCP boxes and network-scope enumeration. Not for subdomain discovery
-  (use SubdomainRecon) or HTTP fingerprinting (use HttpProbe).
+  (use subfinder) or HTTP fingerprinting (use httpx).
 arguments: "target [ports]"
-model: default
+model: inherit
 effort: medium
 context: inline
 agent:
@@ -63,10 +63,10 @@ and network-scope recon pass.
    ```
 6. **Hand-off / branch.** Summarize open services for downstream skills and write the run record:
    ```bash
-   { echo "# $target"; grep -E '/open' "$RUN/scans/detail.nmap" 2>/dev/null || echo "no open ports"; } > "$RUN/summary.txt"
+   { echo "# $target"; grep -E '/open' "$RUN/scans/detail.gnmap" 2>/dev/null || echo "no open ports"; } > "$RUN/summary.txt"
    ```
-   Then branch by service to per-service skills (SMB → enum4linux-ng/smbmap, HTTP(S) → HttpProbe
-   / ContentDiscovery / web skills), and feed `detail.xml` to exploit lookup (`searchsploit --nmap`).
+   Then branch by service to per-service skills (SMB → enum4linux-ng/smbmap, HTTP(S) → httpx
+   / ffuf / web skills), and feed `detail.xml` to exploit lookup (`searchsploit --nmap`).
 7. **Write the run record** `_run.json` into `$RUN/` (schema in Output formats) capturing intent,
    per-item status, exit codes, and any hard errors.
 
@@ -101,9 +101,9 @@ record `$RUN/_run.json`:
 out of scope) set `status: error` and push a human-readable line to `errors[]`.
 
 ## RAG / shared data / cross-skill
-Consumes a confirmed in-scope `target` (often an IP/host from SubdomainRecon/HttpProbe). The
+Consumes a confirmed in-scope `target` (often an IP/host from subfinder/httpx). The
 XML output feeds exploit-lookup (`searchsploit --nmap`); service results branch to
-`enum4linux-ng`, `smbmap`, and the web skills (HttpProbe → ContentDiscovery → VulnScanner).
+`enum4linux-ng`, `smbmap`, and the web skills (httpx → ffuf → nuclei).
 A GTFOBins/HackTricks RAG note helps map a discovered service → next step. No wordlists needed.
 
 ## Checklist

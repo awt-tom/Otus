@@ -1,4 +1,4 @@
-# Kali / Offensive-Security Tooling — Skill-Authoring Reference
+# Skill Generator Guide — Offensive-Security Skill Authoring
 
 > **Purpose of this file.** This is the hand-off document for your coder. It describes (1) the skill-file format your runtime expects, (2) a copy-paste template, (3) how to pick `model` / `effort` / `context` / `agent` per tool, and (4) a catalog of the most-used Kali tools for **bug bounty** and **CTF / Hack The Box**, where each tool already answers the six questions needed to write its `SKILL.md`.
 >
@@ -34,7 +34,7 @@ description: >                        # TRIGGER TEXT. "Use when <task>, with <to
   One or two sentences, keyword-dense, written so the matcher fires on the
   right requests and nothing else.
 arguments: "<positional args as a space-separated string>"   # e.g. "target_url wordlist [threads]"
-model: <model-id | default>           # pick per §4; omit/`default` to inherit
+model: inherit                        # §4; valid Claude Code values: inherit | sonnet | opus | haiku. 'inherit' keeps the session model. NOT 'default'.
 effort: low | medium | high | xhigh | max
 context: inline | fork                # "fork" = run the body in a forked subagent
 agent: <subagent-name>                # only when context: fork (e.g. Explore, general-purpose)
@@ -48,7 +48,7 @@ agent: <subagent-name>                # only when context: fork (e.g. Explore, g
 | `name` | Stable unique slug | Must match what you'd type; used in chaining references. |
 | `description` | The match trigger | The highest-leverage field. Lead with the action, include tool name + synonyms. |
 | `arguments` | Positional args, space-separated | List required first, optional in `[brackets]`. Keep ≤ 3–4; everything else is a flag the body sets. |
-| `model` | Model override | Cheap/fast for deterministic runners; stronger for interpretation/exploit reasoning. |
+| `model` | Model override | Valid Claude Code values: `inherit`/`sonnet`/`opus`/`haiku` (**not** `default`). Use `inherit` to keep the session model; pin a stronger model only for interpretation/exploit reasoning. |
 | `effort` | Reasoning budget | Scale to how much *judgement* (not runtime) the task needs. See §4. |
 | `context` | Inline vs forked | `fork` for long fan-out / noisy output you don't want polluting the main thread. |
 | `agent` | Subagent to fork into | Only with `context: fork`. Match the agent's tool access to the job. |
@@ -64,7 +64,7 @@ Every body answers the six required questions in a fixed order so your coder can
 name: <slug>
 description: Use when <task>. Covers <tool + aliases>. <when NOT to use, if helpful>.
 arguments: "<positional args>"
-model: default
+model: inherit
 effort: medium
 context: inline
 agent:
@@ -127,6 +127,7 @@ Pick by **how much judgement the task needs**, not how long the command runs.
 - **`context: fork`** when the body will generate a lot of tool chatter or run many iterations — keeps the main thread clean and lets you point a purpose-built agent at it. Use `Explore` for read-only search/recon; `general-purpose` when the fork must run tools and write files.
 - **`effort: max`** is for binary exploitation, crypto, and multi-step exploit chains where a wrong step wastes a run. Don't waste it on an nmap scan.
 - **`model`** mostly tracks effort; override only when a specific tool clearly needs a stronger reasoner (pwn/rev/crypto) or clearly doesn't (scanners/parsers).
+- **Valid `model:` values** in Claude Code are `inherit`, `sonnet`, `opus`, or `haiku` — **never `default`** (that errors with "model may not exist"). Default to `inherit` (keep the session model); pin `sonnet`/`opus`/`haiku` only when a tool clearly needs it. The table's model column (fast/cheap · mid/strong · strongest) is guidance, not a literal frontmatter value.
 
 ---
 
@@ -499,8 +500,13 @@ AD: netexec → bloodhound → impacket/certipy/kerberoast → hashcat → netex
 
 ## 8. Suggested directory layout
 
+> **Actual repo layout:** skills live **flat** under `.claude/skills/<tool>/SKILL.md` with
+> **tool-named** folders (e.g. `port-scanner`, `subfinder`, `ffuf`, `nuclei`, `review`) — no
+> category subfolders. The grouped tree below is the original suggestion; the folders are
+> tool-named, so map any capability name here to its tool folder.
+
 ```
-skills/
+.claude/skills/
 ├── recon/
 │   ├── subfinder/SKILL.md
 │   ├── httpx/SKILL.md
