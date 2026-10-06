@@ -23,11 +23,11 @@ Turn a confirmed vector into verified root on an authorized host: execute the es
 non-destructive transcript proving `uid=0(root)`, and record the root flag — certifiable evidence, not a self-report.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes" "$RUN/loot"`); scope inherited from `out/<engagement>/scope.txt`. **Transport:** the local shell holds no session on the target — run every target-side command through an explicit foothold channel (`ssh user@target '<cmd>'`, a webshell/RCE one-shot, or `tmux send-keys`/`capture-pane`) and tee output back locally. Record it in `notes/transport.txt`.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill privesc-root --target "$TARGET")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Record the explicit one-shot SSH/webshell/RCE transport in `notes/transport.txt`.
 2. **Enumerate + identify the vector.** Run `linpeas` plus, in the foothold, `uname -a; sudo -l; find / -perm -4000 -type f 2>/dev/null; getcap -r / 2>/dev/null` → `notes/enum.txt`; capture the vulnerable service's exact version; `searchsploit <service/version>` (local) maps version→exploit. Record the chosen vector + exact version/ref in `notes/version.txt`.
-3. **Escalate (least-destructive).** Run the chosen vector through the transport, teeing the **full** transcript (incl. failed attempts, which corroborate the working path) to `loot/root-shell.log`.
+3. Every enum/escalation/proof command uses `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <original bounded transport argv>`. Save full escalation transcript to `loot/root-shell.log`; a failed action is not replayed.
 4. **Prove root (non-destructive).** In the root context run read-only checks `id; whoami; hostname` → `loot/root-proof.txt` — this transcript is the certifiable proof and must show `uid=0`.
-5. **Flag + summary + run record.** `cat /root/root.txt` → `notes/root-flag.txt` (marker if absent); write `findings.md` (root proven / not achieved) and `run.json`.
+5. Capture `cat /root/root.txt` through the same helper/transport to `loot/root-flag.txt`, never metadata. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'transport-recorded=ok:notes/transport.txt' --item 'vector-identified=ok:notes/version.txt'`; add root-proof item and verified `--finding` only for actual uid=0 evidence. Otherwise partial/error; include actual artifacts and cleanup fields.
 
 ## Modern tooling & alternatives
 Enumerate first with `linpeas`/`pspy`; map findings to abuse via **GTFOBins / LOLBAS** and kernel/OS
@@ -38,9 +38,9 @@ hand-written PoC is often cleaner than a framework. Prefer least-destructive; ke
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); foothold host authorized
+    desc: Explicit engagement authorization and foothold/proof host checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: transport-recorded

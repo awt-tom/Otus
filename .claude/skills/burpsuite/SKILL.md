@@ -24,11 +24,11 @@ Manually intercept, inspect, modify, and replay HTTP(S) against an in-scope web 
 attack surface and driving Repeater/Intruder exploitation (IDOR/authz/logic, injection leads).
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes" "$RUN/requests"`); scope is inherited from `out/<engagement>/scope.txt`. In Burp set **Target → Scope** to in-scope hosts only and restrict Proxy/Logger to in-scope URLs so nothing out-of-scope is captured or attacked.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill burpsuite)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. For lists use `--targets-file "$HOSTS"`. `mkdir -p "$RUN/requests"`; restrict Burp Target/Proxy/Logger to checked hosts before browsing.
 2. **Proxy + map.** Route the browser through Burp, authenticate, and browse/crawl so **Target → Site map** populates; capture mapped endpoints/parameters into `notes/sitemap.md` (export items or paste the host tree) so "mapped" is evidenced.
 3. **Repeater — targeted testing.** Send interesting requests to Repeater; test IDOR / broken authz / logic by swapping IDs, tokens, roles and tampering params. Save notable raw request/response into `requests/` (one file per case). Hand injectable params to `sqlmap` (save item → `req.txt`).
 4. **Intruder + helpers.** Use Intruder for targeted fuzzing (sniper/cluster-bomb), and Decoder/Comparer/Sequencer as needed. Useful extensions: **Autorize** (authz), **Param Miner** (hidden params), **Logger++**.
-5. **Record findings + marker.** Write each finding (endpoint, request, observation, impact) to `findings.md`; if none, write `no findings recorded`. Export the Burp project/report alongside. Write `run.json`.
+5. Export requests/project/report and record each manual step with `python3 -I scripts/otus-log.py event --run-dir "$RUN" --event marker --note "$STEP"`. CLI companions use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- CMD`. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'app-mapped=ok:notes/sitemap.md' --item 'requests-tested=ok:findings.md'`; add verified `--finding` entries referencing saved cases and actual cleanup fields. Use no-findings summary if none.
 
 ## Modern tooling & alternatives
 Burp is standard — **Pro** for active scan/extensions, **Community** for manual Repeater/Intruder
@@ -39,9 +39,9 @@ scanning use `nuclei`; for content discovery `ffuf` — Burp is the manual hub t
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); Burp Target scope restricted to in-scope hosts before testing
+    desc: Explicit engagement authorization, endpoints checked, and Burp scope restricted
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: app-mapped
@@ -67,4 +67,4 @@ checklist:
 ## Notes / pitfalls
 - **Scope first.** Setting Burp's Target scope to in-scope hosts only (and filtering Proxy/Logger) is mandatory before browsing — otherwise you capture/attack out-of-scope traffic; `scope-confirmed` fails hard.
 - Hand injectable parameters to `sqlmap` (save item → `req.txt`), not hand-brute-forced; Community Edition throttles Intruder and has no active scan, so plan manual/targeted fuzzing.
-- A run that finds nothing must still write `no findings recorded` to `findings.md`.
+- A no-hit run still finishes with `no findings recorded`; findings.md is rendered by the helper.

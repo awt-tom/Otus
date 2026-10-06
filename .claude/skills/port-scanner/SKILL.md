@@ -23,11 +23,11 @@ Enumerate open ports, services, and versions on a host and hand a clean, machine
 inventory to downstream per-service skills.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`), `mkdir -p "$RUN/scans"`; scope is inherited from `out/<engagement>/scope.txt`.
-2. Full-port sweep (all three formats; `-Pn` when ICMP is filtered): `nmap -p- --min-rate 2000 -Pn -oA "$RUN/scans/allports" "$target" | tee -a "$RUN/run.log"`.
-3. Extract open ports: `ports="$(grep -oE '[0-9]+/open' "$RUN/scans/allports.gnmap" | cut -d/ -f1 | paste -sd, -)"`. If none, write `no open ports` to both `scans/detail.nmap` and `findings.md` and stop (empty ≠ didn't-run).
-4. Service/version + default scripts on open ports only: `nmap -sCV -p"$ports" -Pn -oA "$RUN/scans/detail" "$target" | tee -a "$RUN/run.log"`. Add non-intrusive NSE per service (e.g. `--script=smb-os-discovery`) as needed.
-5. Summarize open services to `findings.md`, feed `detail.xml` to `searchsploit --nmap`, branch by service (SMB→netexec, HTTP→httpx/ffuf), write `run.json`.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill port-scanner --target "$target")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$target" --run-dir "$RUN"`; nonzero STOP. `mkdir -p "$RUN/scans"`.
+2. Full sweep: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$target" -- nmap -p- --min-rate 2000 -Pn -oA "$RUN/scans/allports" "$target"` (timeouts per AGENTS.md).
+3. Extract ports: `ports="$(grep -oE '[0-9]+/open' "$RUN/scans/allports.gnmap" | cut -d/ -f1 | paste -sd, -)"`. If none, write `no open ports` to `scans/detail.nmap`, skip step 4, and finish with that summary (empty is not failure).
+4. Detail: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$target" -- nmap -sCV -p"$ports" -Pn -oA "$RUN/scans/detail" "$target"`. Add non-intrusive NSE per service (e.g. `--script=smb-os-discovery`) as needed.
+5. Save service notes, wrap `searchsploit --nmap` with the helper if used, and branch SMB to netexec / HTTP to httpx/ffuf. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status complete --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'allports-scan=ok:scans/allports.nmap' --item 'service-detail=ok:scans/detail.nmap' --target-state unchanged --cleanup not-needed`.
 
 ## Modern tooling & alternatives
 `nmap` stays standard; `rustscan` / `masscan` / `naabu` sweep ports fast, then hand them to nmap for
@@ -37,9 +37,9 @@ inventory to downstream per-service skills.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization and scan target checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: allports-scan
@@ -60,4 +60,4 @@ checklist:
 - `-p-` (all 65535 ports) is slow — pair with `--min-rate` or a fast scanner first, then nmap `-sCV` only the open ports.
 - Avoid intrusive NSE categories (`exploit`, `brute`, `dos`) unless explicitly authorized; `-sC` runs only the `default` category.
 - `-Pn` skips host discovery (treats host as up) — correct when ICMP is filtered, but can mask a host that is actually down.
-- A run that finds nothing must still write the `no open ports` marker to `scans/detail.nmap` and `findings.md`.
+- A run with no ports writes the marker to `scans/detail.nmap`; finish renders the matching summary.

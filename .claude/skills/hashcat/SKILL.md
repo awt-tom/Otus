@@ -24,10 +24,10 @@ Recover plaintext from captured hashes — identify the hash type, crack with an
 wordlist → rules → mask strategy, and list what cracked — to enable authenticated access or lateral movement.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Identify the hash type with `hashid`/`name-that-hash` → a hashcat `-m <mode>` (record it in `notes/mode.txt`); fail fast on an empty hash file. Default `WL=/usr/share/wordlists/rockyou.txt`.
-2. **Wordlist attack** (fastest first pass): `hashcat -m "$MODE" "$HASHES" "$WL" --outfile "$RUN/cracked.txt" 2>&1 | tee -a "$RUN/run.log"`.
+1. Offline work: `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill hashcat)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"`; nonzero STOP. Helper-wrap hashid/name-that-hash; record `MODE` in `notes/mode.txt`. Empty hashes finalize error. Default `WL=/usr/share/wordlists/rockyou.txt`.
+2. `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- hashcat -m "$MODE" "$HASHES" "$WL" --outfile "$RUN/cracked.txt"`. Arguments remain unchanged; metadata is redacted, raw output stays restricted.
 3. **Escalate deliberately** (don't brute blindly): add rules `-r /usr/share/hashcat/rules/best64.rule`, then a mask `-a 3 '?u?l?l?l?l?d'` — same `-m`/`--outfile`.
-4. **List cracked + marker + run record.** `hashcat -m "$MODE" "$HASHES" --show > "$RUN/show.txt"` lists everything cracked (from the potfile). Write a run marker (`no hashes cracked` if none), then `run.json`. Feed cracked creds to `netexec`/login skills.
+4. Every subsequent hashcat call uses the helper, including `hashcat -m "$MODE" "$HASHES" --show > "$RUN/show.txt"`; do not include unrelated potfile entries. Nonzero exhaustion is recorded with its actual exit and explained, not silently promoted. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'mode-identified=ok:notes/mode.txt' --item 'crack-attempted=ok:findings.md' --target-state unchanged --cleanup not-needed`; use no-hashes summary or secret-free verified findings. Credential reuse requires a separate endpoint check.
 
 ## Modern tooling & alternatives
 `hashcat` (GPU) is primary; `john` (Jumbo) for format coverage / CPU and `*2john` converters (zip2john,
@@ -37,9 +37,9 @@ ssh2john, …) bridge formats. `hashid`/`name-that-hash` for identification. Kee
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); hashes and use of recovered creds in scope
+    desc: Explicit engagement authorization and artifact provenance checked; reuse gated separately
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: mode-identified
@@ -65,4 +65,4 @@ checklist:
 ## Notes / pitfalls
 - **Don't brute blindly** — climb the ladder (wordlist → rules → masks → combinator); most cracks come from `rockyou` + `best64.rule`.
 - Pick `-m <mode>` from the hash type first; a wrong mode wastes the whole run. The potfile caches results — `--show` re-lists cracked hashes instantly without re-cracking.
-- `*2john`/jumbo converters bridge archive/doc formats into crackable hashes. A run that cracks nothing still writes `findings.md` ("no hashes cracked").
+- `*2john`/jumbo converters bridge formats. No recovered hashes still finishes with an explicit secret-free summary.

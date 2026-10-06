@@ -24,10 +24,10 @@ From a host/subdomain list, determine which are live over HTTP(S) and capture ti
 IP, and CDN — the "what's actually reachable" filter that narrows the attack surface before scanning.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope is inherited from `out/<engagement>/scope.txt`. Point `HOSTS` at the input list (usually `subs.txt`); fail fast if empty: `[ -s "$HOSTS" ] || { echo "input empty: $HOSTS"; exit 1; }`.
-2. **Probe live HTTP(S) + fingerprint:** `httpx -l "$HOSTS" -title -tech-detect -status-code -ip -o "$RUN/live.txt" | tee -a "$RUN/run.log"`. Add `-json -o "$RUN/httpx.jsonl"` for a structured record; `-rate-limit <n>` to stay polite.
+1. Point `HOSTS` at a plain host list. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill httpx)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP.
+2. **Probe:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- httpx -l "$HOSTS" -title -tech-detect -status-code -ip -o "$RUN/live.txt"`. Add `-json -o "$RUN/httpx.jsonl"` for structured output or bounded `-rate-limit`.
 3. **Split interesting hosts** (200s/redirects, juicy tech) for follow-up: `grep -E ' \[(200|30[1278])\]' "$RUN/live.txt" > "$RUN/interesting.txt" 2>/dev/null || true`.
-4. **Marker + hand-off.** If `live.txt` is empty, write `no live hosts` to `findings.md` and ensure a clean empty `live.txt`; else summarize the count. Feed `live.txt` to `katana` (crawl) → `nuclei` (scan) and `ffuf`. Write `run.json`.
+4. **Hand-off:** keep `live.txt` as raw fingerprint output; save ONLY host/URL tokens to `notes/hosts.txt` for downstream scope checks and nuclei/ffuf. Use summary `no live hosts` if empty. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status complete --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'probe-ran=ok:findings.md' --item 'handoff-written=ok:live.txt' --target-state unchanged --cleanup not-needed`.
 
 ## Modern tooling & alternatives
 ProjectDiscovery `httpx` is the standard probe/fingerprinter — **not** the Python `httpx` HTTP library
@@ -37,9 +37,9 @@ ProjectDiscovery `httpx` is the standard probe/fingerprinter — **not** the Pyt
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization and every input host checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: probe-ran
@@ -65,4 +65,4 @@ checklist:
 ## Notes / pitfalls
 - Use the **ProjectDiscovery** `httpx` binary, not the Python `httpx` library — they are unrelated.
 - Feed a resolved/valid host list (`subfinder` → `dnsx`), not raw wildcard noise, or probes waste time on dead names; `-rate-limit <n>` to respect program rules.
-- A run that finds nothing live must still write `findings.md` ("no live hosts") and a clean empty `live.txt`; keep `live.txt` a clean list fed verbatim downstream.
+- An empty live result still finishes with `no live hosts`; never feed fingerprint annotations to a target checker.

@@ -23,10 +23,10 @@ Produce a fast, passive, de-duplicated list of subdomains for an in-scope apex d
 list ready to resolve and probe downstream.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope is inherited from `out/<engagement>/scope.txt`.
-2. **Passive enumeration** into a clean list: `subfinder -d "$domain" -all -recursive -silent -o "$RUN/subs.txt" | tee -a "$RUN/run.log"`. Add `-oJ -o "$RUN/subs.jsonl"` for a structured record (host + source).
-3. **De-dupe / merge (optional).** Fold in other passive sources and keep only new lines with `anew`: `assetfinder --subs-only "$domain" 2>>"$RUN/run.log" | anew "$RUN/subs.txt" >/dev/null`.
-4. **Marker + hand-off.** If `subs.txt` is empty, write `no subdomains found` to `findings.md` and ensure a clean empty `subs.txt` (never write the marker into it); else summarize the count. Feed `subs.txt` to `dnsx` → `httpx` → `nuclei`/`katana`. Write `run.json`.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill subfinder --target "$domain")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$domain" --run-dir "$RUN"`; nonzero STOP.
+2. **Passive enumeration:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$domain" -- subfinder -d "$domain" -all -recursive -silent -o "$RUN/subs.txt"`. Add `-oJ -o "$RUN/subs.jsonl"` for host/source records.
+3. **Optional merge:** export `domain RUN`; `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$domain" -- bash -o pipefail -c 'assetfinder --subs-only "$domain" | anew "$RUN/subs.txt" >/dev/null'`. Check newly discovered hosts before probing them.
+4. Keep `subs.txt` a pure host list; summary is count or `no subdomains found`. Feed it to dnsx/httpx. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status complete --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'enum-ran=ok:findings.md' --item 'handoff-written=ok:subs.txt' --target-state unchanged --cleanup not-needed`.
 
 ## Modern tooling & alternatives
 ProjectDiscovery `subfinder` is the standard for passive discovery. Pair with `amass` (more thorough,
@@ -37,9 +37,9 @@ is superseded. A provider API-keys config unlocks more passive sources (keep key
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization and apex target checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: enum-ran
@@ -64,5 +64,5 @@ checklist:
 
 ## Notes / pitfalls
 - **Passive only** — low noise and a safe default; it does not actively resolve or brute-force DNS (that is `dnsx`/brute skills downstream).
-- A run that finds nothing must still write `findings.md` ("no subdomains found") and a clean empty `subs.txt`.
+- No discoveries still finish with `no subdomains found` and a clean empty `subs.txt`.
 - Keep `subs.txt` a pure host list fed verbatim to `dnsx`/`httpx` — the marker goes in `findings.md`, never in `subs.txt`.

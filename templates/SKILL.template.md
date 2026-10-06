@@ -20,13 +20,12 @@ Shared contract: see AGENTS.md.
 What a successful run produces and why you'd reach for this. 1-2 sentences.
 
 ## Steps
-1. Inputs / precondition. Set up the run dir per AGENTS.md (`$RUN`); scope is already confirmed once
-   in `out/<engagement>/scope.txt`, so do not re-confirm it here.
-2. `<exact command form — copy the tool's real flags verbatim; never invent a flag>`
+1. Set inputs from the user. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill <tool>)"`.
+  `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Use `--targets-file "$HOSTS"` for batches; offline work omits target options.
+2. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <exact original executable argv>`; all active commands use this wrapper, including verification. Offline work omits target options; GUI work saves exports and records `event --event marker` instead.
 3. Decision point: if X then …, else …
 4. Verify / triage the results (drop false positives; keep only real findings).
-5. Hand-off: write outputs to `$RUN/` and name the next skill to chain. A step that can legitimately
-   find nothing still writes a marker file so "ran but empty" ≠ "didn't run". Then write `run.json`.
+5. Preserve raw outputs and empty-result markers; name the next skill. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json'`; add actual checklist items, verified `--finding` entries, and target-state/cleanup fields. Error paths and rendered findings follow AGENTS.md; never hand-write JSON or findings.md.
 
 ## Modern tooling & alternatives
 Current best-in-class, notable flags, and the legacy tools this replaces. Note version-sensitive
@@ -36,9 +35,9 @@ behaviour.
 ```yaml
 checklist:
   - id: scope-confirmed            # always first; references the inherited engagement scope
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization and applicable endpoints checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   # --- tool-unique items below: 3-6 that prove THIS tool actually ran and produced real results ---

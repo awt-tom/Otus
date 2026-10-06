@@ -24,11 +24,11 @@ Select, configure, and run the right exploit/auxiliary module against an authori
 with `check` before firing, deliver a payload, and manage the session, capturing the full transcript.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Gather `nmap` service/version; determine the correct `LHOST` for the lab network.
-2. **Drive msfconsole non-interactively** (one-shot `-x`, no REPL — AGENTS.md): `msfconsole -q -x "spool $RUN/run.log; workspace -a <engagement>; search <service/cve>; use <module>; set RHOSTS <target>; set LHOST <you>; set payload <payload>; check; run; sessions -l; exit"`. Record the chosen module + options in `notes/modules.txt`.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill metasploit)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Check every RHOSTS entry, not just one; record LHOST and module/options without secrets.
+2. Wrap one-shot `msfconsole -q -x "workspace -a <engagement>; search <service/cve>; use <module>; set RHOSTS <target>; set LHOST <you>; set payload <payload>; check; run; sessions -l; exit"` with `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --` (batch: `--targets-file "$HOSTS"`). Only run after a separately inspected check result; the helper replaces the logging-only spool. Record options in `notes/modules.txt`.
 3. **`check` before `run`.** Only `run`/`exploit` on a positive (or deliberately-justified) `check`. **Never** Autopwn / browser_autopwn (OSCP-banned, indiscriminate).
 4. **Session / post-ex.** On a session: `sessions -i <id>`, run post modules, `migrate`, loot; `db_export -f xml "$RUN/workspace.xml"` to save the workspace.
-5. **Marker + run record.** If `run.log` shows a session opened write the marker to `findings.md`, else `no session — module(s) tried`. Write `run.json`.
+5. All post-ex commands remain one-shot/helper-wrapped; never hold a REPL/session. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'module-selected=ok:notes/modules.txt' --item 'run-executed=ok:findings.md' --item 'check-before-run=ok:run.log'`; add verified `--finding` proof and actual artifacts/cleanup fields. Summary records `no session` when applicable.
 
 ## Modern tooling & alternatives
 `msfconsole` is still the standard framework. For manual / OSCP-style work prefer single exploits from
@@ -39,9 +39,9 @@ when you don't want the full framework.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); LHOST set for the lab network
+    desc: Explicit engagement authorization and every RHOSTS target checked; LHOST recorded
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: module-selected
@@ -67,4 +67,4 @@ checklist:
 ## Notes / pitfalls
 - **Use `check` before `run`** (avoid noisy auto-exploitation); **Autopwn/browser_autopwn are OSCP-banned** — do not use them. `check-before-run` fails hard (`on_fail: fail`).
 - Set `LHOST` to the correct interface for the lab/engagement network, or your payload never calls back.
-- For OSCP-style manual work prefer single `searchsploit`/GitHub exploits; a run that opens no session must still write `findings.md` ("no session …") and `notes/modules.txt`.
+- Prefer manual searchsploit/GitHub PoCs where appropriate; no session still finishes with a matching summary and module notes.

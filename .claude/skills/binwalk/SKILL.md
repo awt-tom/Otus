@@ -23,11 +23,11 @@ Find and extract embedded/hidden files within a blob — concatenated archives, 
 and hand the carved output to the next RE/stego step, with the signature report + extraction captured.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`); scope inherited from `out/<engagement>/scope.txt`. Fail fast on an empty file; `cp -a "$TARGET" "$RUN/" && cd "$RUN"` (extraction spawns many files — work in a scratch dir).
-2. **Signature scan** (identify embedded content + offsets): `binwalk "$BN" 2>&1 | tee "$RUN/signatures.txt"`.
-3. **Extract.** Carve what was found: `binwalk -e "$BN"` (add `--dd='<type>'` to force-carve a specific signature `-e` misses).
-4. **Recurse if nested.** For firmware / matryoshka blobs: `binwalk -Me "$BN"`.
-5. **Inspect + marker + hand-off.** Look through `_<file>.extracted/`; write a run marker (`no embedded content detected` if none), then `run.json`. Hand carved files to `ghidra`/`steghide`/`wireshark`.
+1. Offline artifact: `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill binwalk)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"`; nonzero STOP. Empty files finalize error. Copy the blob into RUN; export `RUN BN` for scratch-directory commands.
+2. **Signature scan:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- bash -o pipefail -c 'cd "$RUN" && binwalk "$BN"' > "$RUN/signatures.txt"`.
+3. **Extract:** wrap scratch-directory `binwalk -e "$BN"` with the same helper/shell form (add original `--dd='<type>'` if needed).
+4. **Nested extraction:** wrap scratch-directory `binwalk -Me "$BN"` the same way; review extracted symlinks before any follow-up, never follow escapes.
+5. Inspect carved files and hand off to ghidra/stego. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'scanned=ok:signatures.txt' --item 'extracted=ok:findings.md' --item 'results-recorded=ok:findings.md' --target-state unchanged --cleanup not-needed`; add secret-free artifact findings with real evidence, or `no embedded content detected`.
 
 ## Modern tooling & alternatives
 `binwalk` (v3 Rust rewrite) is the default; companions `foremost`/`scalpel` (header carving),
@@ -37,9 +37,9 @@ and hand the carved output to the next RE/stego step, with the signature report 
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); blob authorized for analysis
+    desc: Explicit engagement authorization and blob provenance checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: scanned
@@ -66,4 +66,4 @@ checklist:
 - **Extraction spawns many files** — always work in a scratch dir (the run directory), never in place.
 - `-Me` recurses (matryoshka firmware); watch for extraction bombs on untrusted blobs. `--dd='<type>'` carves a specific signature when `-e` misses it.
 - A clean scan doesn't mean "nothing hidden" — follow up with `steghide`/`zsteg`/`exiftool` and `strings` on the original.
-- A run that finds nothing must still write `findings.md` ("no embedded content detected").
+- No embedded content still finishes with that summary; the helper renders findings.md.

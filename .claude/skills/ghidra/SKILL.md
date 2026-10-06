@@ -23,11 +23,11 @@ Statically understand an unknown binary — decompile to readable C-like pseudoc
 extract the check / flag / vulnerability or algorithm/constraints — then hand it to the exploit or solve step.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/project" "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Triage first: `file "$BIN" | tee "$RUN/notes/triage.txt"; strings -n 8 "$BIN" | head -200 >> "$RUN/notes/triage.txt"`.
-2. **Import + auto-analyze.** GUI: import + run auto-analysis. Headless automation (verified flags `-import -postScript -scriptPath -log -overwrite -deleteProject -noanalysis`): `analyzeHeadless "$RUN/project" ctf -import "$BIN" -log "$RUN/run.log" -overwrite` (add `-scriptPath "$RUN/scripts" -postScript "$3"` to run a script).
+1. Offline artifact: `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill ghidra)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"`; nonzero STOP. `mkdir -p "$RUN/project"`. Helper-wrap `file "$BIN"` / `strings -n 8 "$BIN"`, saving triage to `notes/triage.txt`.
+2. **Import/analyse:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- analyzeHeadless "$RUN/project" ctf -import "$BIN" -log "$RUN/evidence/ghidra.log" -overwrite`; original optional `-scriptPath "$RUN/scripts" -postScript "$3"`. GUI analysis saves exports and helper marker events instead.
 3. **Locate interesting code.** Find `main`/entry and notable functions via strings/xrefs (the flag check, a comparison, a custom crypto/validation routine).
-4. **Read + annotate decompilation.** Work through the pseudocode, renaming variables + adding comments; recover the algorithm / constraints (what input satisfies the check). Record the logic + constants in `findings.md`.
-5. **Hand off + marker + run record.** Pass the extracted algorithm/constraints to `pwntools` (exploit) or a `z3`/Python solve. Write a run marker (`- in progress` if no conclusion), then `run.json`.
+4. **Annotate:** save recovered logic/constraints and disassembly cross-checks in `notes/logic.md`; secret constants/flags remain private evidence, not descriptions.
+5. Hand off to pwntools/z3/solve. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'analyzed=ok:project' --item 'logic-extracted=ok:findings.md' --item 'results-recorded=ok:findings.md' --target-state unchanged --cleanup not-needed`; add `--finding` referencing logic evidence. Inconclusive work is partial with `in progress`, not completed analysis.
 
 ## Modern tooling & alternatives
 Ghidra (free, NSA) is the default decompiler; `IDA Free`, `Binary Ninja`, `radare2`/`Cutter`, `rizin`
@@ -37,9 +37,9 @@ are alternatives. Quick-triage companions: `strings`/`objdump`/`readelf`/`ltrace
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); binary authorized for analysis
+    desc: Explicit engagement authorization and binary provenance checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: analyzed
@@ -66,4 +66,4 @@ checklist:
 - **GUI-heavy** — this skill is a *methodology* + headless scripting, not one command; use `analyzeHeadless` for automation/batch.
 - Quick-triage first (`file`/`strings`/`objdump`) — many CTF binaries give up the flag or a strcmp without full decompilation.
 - Rename/annotate as you go; decompiler output is a starting point, not ground truth — verify against disassembly on tricky functions. Hand recovered constraints to `z3`/`pwntools` rather than solving by hand.
-- A run with no conclusion yet must still write a `- in progress` marker in `findings.md`.
+- No conclusion finishes as partial with an `in progress` summary.

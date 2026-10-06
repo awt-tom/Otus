@@ -23,11 +23,11 @@ Recover data hidden in an image/audio file with steghide — using a known/guess
 cracking it with stegseek + a wordlist — and capture the extracted payload for the next step.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`); scope inherited from `out/<engagement>/scope.txt`. Fail fast on an empty file. Probe embedded data (unencrypted metadata reads without a passphrase): `steghide info "$SF" 2>&1 | tee "$RUN/info.txt"`.
-2. **Extract with a passphrase** (empty passphrase is common in CTFs): `steghide extract -sf "$SF" -p "${2-}" -xf "$RUN/extracted.bin"` (`-sf` stego file, `-p` passphrase, `-xf` output).
-3. **Crack the passphrase** when unknown: `stegseek "$SF" "${3:-/usr/share/wordlists/rockyou.txt}" "$RUN/extracted.bin"` (fast steghide cracker; writes the payload). Metadata-only probe: `stegseek --seed "$SF"`.
-4. **Inspect the payload:** `file "$RUN/extracted.bin"; strings "$RUN/extracted.bin" | head`.
-5. **Marker + hand-off + run record.** Write a run marker (`no payload extracted` if none), then `run.json`. Hand the payload to RE / crypto / `binwalk` follow-ups.
+1. Offline artifact: `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill steghide)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"`; nonzero STOP. Empty files finalize error. `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- steghide info "$SF" > "$RUN/info.txt"`; a prompting form is a tool failure, not an interactive retry.
+2. **Extract:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- steghide extract -sf "$SF" -p "${2-}" -xf "$RUN/extracted.bin"` (empty passphrase common).
+3. **Crack when unknown:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- stegseek "$SF" "${3:-/usr/share/wordlists/rockyou.txt}" "$RUN/extracted.bin"`; metadata-only `stegseek --seed "$SF"` uses the same wrapper.
+4. Helper-wrap `file "$RUN/extracted.bin"` and `strings "$RUN/extracted.bin"`; keep secret contents out of summary/event notes.
+5. Hand payload to RE/crypto/binwalk. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'probed=ok:info.txt' --item 'extract-attempted=ok:findings.md' --target-state unchanged --cleanup not-needed`; add artifact-backed, secret-free `--finding` entries or `no payload extracted`.
 
 ## Modern tooling & alternatives
 `steghide` (JPEG/BMP/WAV/AU, passphrase) with `stegseek` for fast cracking; `zsteg` for PNG/BMP LSB;
@@ -37,9 +37,9 @@ cracking it with stegseek + a wordlist — and capture the extracted payload for
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); file authorized for analysis
+    desc: Explicit engagement authorization and stego-file provenance checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: probed
@@ -66,4 +66,4 @@ checklist:
 - **Empty passphrase is common** in CTFs — try `-p ""` before cracking.
 - steghide only handles JPEG/BMP/WAV/AU — for **PNG/BMP LSB** use `zsteg`, metadata `exiftool`; wrong tool wastes time.
 - `stegseek` runs rockyou in seconds (`--seed` detects steghide data without a password); always `file`/`strings` the payload — it may be another container to carve.
-- A run that extracts nothing must still write `findings.md` ("no payload extracted").
+- No payload still finishes with that summary; findings.md is generated.

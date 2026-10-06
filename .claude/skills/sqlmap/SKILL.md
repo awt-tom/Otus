@@ -23,11 +23,11 @@ Confirm SQLi on an authorized target and, where warranted, exploit it (DBMS fing
 read, shell) — pulling the **minimum** data needed and recording payloads for the report.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Save the target request (Burp "save item" or craft `req.txt`); fail fast if `REQ` is empty.
-2. **Detect / confirm** non-interactively, with capped depth: `sqlmap -r "$REQ" --batch --level "${2:-3}" --risk "${3:-2}" | tee -a "$RUN/run.log"`.
+1. Save `REQ` and identify its actual endpoint as `TARGET`. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill sqlmap --target "$TARGET")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Empty requests finalize error before any scan.
+2. **Detect:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- sqlmap -r "$REQ" --batch --level "${2:-3}" --risk "${3:-2}"`. Every subsequent sqlmap command uses the same wrapper and timeout rules.
 3. **If injectable, enumerate minimally** — fingerprint → `--dbs` → `--tables` → `--dump` only what's needed. **Never `--dump` entire databases by default.** `--dump-format=csv` for structured capture; note every payload/table pulled in `notes/payloads.txt`.
 4. **Advanced (only if authorized & needed).** `--os-shell`, `--file-read=<path>`, `--technique=<BEUSTQ>`, WAF bypass `--tamper=<script>` — intrusive; gate on explicit authorization.
-5. **Evidence + marker.** Copy sqlmap's session output into the run dir: `cp -a "$HOME/.local/share/sqlmap/output/." "$RUN/sqlmap-output/" 2>/dev/null || true`. If the log shows a confirmed injection write the marker to `findings.md`, else `no injection confirmed`. Write `run.json`.
+5. Copy only THIS invocation's session output to `sqlmap-output/`, never unrelated cached targets. Record payloads even if none. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'detection-ran=ok:findings.md' --item 'data-minimised=ok:notes/payloads.txt'`; add verified `--finding` entries and actual target-state/cleanup fields. Use `no injection confirmed` if none.
 
 ## Modern tooling & alternatives
 `sqlmap` remains the standard for automated SQLi; `ghauri` is a faster newer alternative. For manual
@@ -37,9 +37,9 @@ blind SQLi, hand-crafted payloads + Burp Repeater. **Banned in the OSCP exam** �
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization and request endpoint checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: detection-ran
@@ -66,4 +66,4 @@ checklist:
 - `--batch` for non-interactive runs; cap `--level`/`--risk` rather than cranking them blindly.
 - **Never `--dump` entire databases by default** — pull the minimum needed and record exactly what was extracted in `notes/payloads.txt`; `data-minimised` fails hard (`on_fail: fail`).
 - Intrusive options (`--os-shell`, `--file-read`, writes) only with explicit authorization.
-- A run that confirms nothing must still write `findings.md` ("no injection confirmed") and `notes/payloads.txt`.
+- No injection still finishes with that summary and notes/payloads.txt; findings.md is generated.

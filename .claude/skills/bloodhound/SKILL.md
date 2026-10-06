@@ -24,11 +24,11 @@ Collect AD objects and reveal privesc / lateral-movement paths to high-value tar
 Admin) via Cypher — shortest path + abusable ACLs; re-collect as each new identity is gained.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/collection" "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. **Collection is noisy — scope it to the lab.** Gather valid creds (often from `netexec`) and the DC IP (`-ns`).
-2. **Collect** into the collection dir (match collector to the CE ingest version): `cd "$RUN/collection" && bloodhound-python -u <user> -p <pass> -d "$DOMAIN" -c All -ns <DC_IP> 2>&1 | tee -a "$RUN/run.log"`. Alternatives: SharpHound on a domain host, or `nxc ldap <DC> -u u -p p --bloodhound`.
+1. Gather creds/DC and a plain `HOSTS` list covering all contacted domain hosts. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill bloodhound)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP. `mkdir -p "$RUN/collection"`; stop if collection would discover/contact unchecked hosts.
+2. **Collect:** wrap `cd "$RUN/collection" && bloodhound-python -u <user> -p <pass> -d "$DOMAIN" -c All -ns <DC_IP>` with `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- bash -o pipefail -c '<command>'`; export required variables. SharpHound / `nxc ldap <DC> -u u -p p --bloodhound` use the same checked wrapper.
 3. **Import** the resulting JSON/zip into **BloodHound CE** (drag-drop / API upload).
-4. **Analyse with Cypher.** Run built-in + custom queries (kerberoastable, DCSync rights, shortest path to Domain Admins, abusable ACLs). Record each attack path / abusable ACL with the query used in `findings.md`.
-5. **Marker + re-collect loop + run record.** Write a run marker (`- none …` if no path), then re-collect as each new identity is gained. Write `run.json`.
+4. **Analyse:** save Cypher queries and observed attack paths/ACLs in `notes/paths.md`; GUI import/query steps write helper marker events. No inferred path is a proved exploit.
+5. Re-collection with a new identity gets a fresh isolated run. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'collected=ok:collection' --item 'paths-analyzed=ok:findings.md' --item 'results-recorded=ok:findings.md'`; add verified `--finding` entries referencing query evidence, or no-path summary, with actual state/cleanup.
 
 ## Modern tooling & alternatives
 BloodHound **CE** is current — match the collector to the CE ingest version. Collectors: `bloodhound-python`
@@ -38,9 +38,9 @@ BloodHound **CE** is current — match the collector to the CE ingest version. C
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); collection scoped to the lab
+    desc: Explicit engagement authorization and all collection hosts checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: collected
@@ -67,4 +67,4 @@ checklist:
 - **Collection is noisy** — scope it to the lab; `scope-confirmed` fails hard (`on_fail: fail`).
 - **Match the collector version to the BloodHound CE ingest version**, or import fails / misparses.
 - **Re-collect as each new identity is gained** — paths change with new group membership.
-- Feeds `impacket`/`certipy`; kerberoast/AS-REP hashes feed `hashcat`. A run that finds no path still writes a `- none` line in `findings.md`.
+- Feeds impacket/certipy and offline hashcat. No path still finishes with a no-path summary.

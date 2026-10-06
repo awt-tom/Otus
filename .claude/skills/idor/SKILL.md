@@ -24,11 +24,11 @@ data; vertical: higher-privilege actions) and prove it with a minimal, non-destr
 an authorization matrix.
 
 ## Steps
-1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope is inherited from `out/<engagement>/scope.txt`. Provision **two test accounts/roles** you control (A low-priv, B other-user or admin) for the matrix.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill idor)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Use two controlled test accounts/roles; account creation is a state change requiring recorded cleanup.
 2. **Enumerate object identifiers.** Map endpoints that take an object reference (`/users/123`, `?id=`, `?file=`, UUIDs, hashids) from `httpx`→`katana`/`ffuf`/Burp; record ID format (sequential/UUIDv4/hash) and ownership in `notes/objects.md`.
 3. **Swap / escalate.** With account A's session, request account B's object IDs (**horizontal**); then attempt higher-privilege objects/actions and admin-only methods (**vertical**). Test method/param tampering (GET↔POST, role fields); compare to the legitimate owner's response.
 4. **Authorization matrix.** Build a `{account/role} × {object/action}` → allowed/denied/leaked grid in `notes/authz-matrix.md` so access gaps are explicit and reviewable.
-5. **Confirm + impact PoC.** Confirm unauthorized access with a **minimal** proof (read one other-user record, not a mass dump; a single reversible state change only if needed). Write each finding (endpoint, IDs, direction, impact) to `findings.md`; if none, write `no idor confirmed`. Write `run.json`.
+5. CLI requests use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <original argv>`; manual requests save cases and marker events. Confirm one controlled record, not a mass dump. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'ids-enumerated=ok:notes/objects.md' --item 'authz-matrix=ok:notes/authz-matrix.md' --item 'confirmed-impact=ok:findings.md'`; add verified `--finding` entries referencing cases and actual cleanup fields, or summary `no idor confirmed`.
 
 ## Modern tooling & alternatives
 Mostly manual via Burp Suite — **Autorize** / **AuthMatrix** automate the A-vs-B replay; Repeater/
@@ -39,9 +39,9 @@ systematic authz matrix.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization, endpoint, and test-account use checked
     verify: judge
-    evidence: ../../scope.txt
+    evidence: ../../scope.json
     on_fail: fail
     required: true
   - id: ids-enumerated
@@ -67,4 +67,4 @@ checklist:
 ## Notes / pitfalls
 - **Two accounts make the test.** A finding is "A can reach B's object" — without a second identity you can only guess; the authz matrix needs real A-vs-B comparison.
 - **Minimal, reversible proof only.** Read one other-user record; never mass-enumerate or delete/modify others' data; `confirmed-impact` fails hard (`on_fail: fail`).
-- Check vertical (privilege) and object-level (BOLA) access, not just sequential-ID swapping (UUIDs can still be IDOR if they leak elsewhere); a run that confirms nothing must still write `findings.md` ("no idor confirmed").
+- Check vertical and object-level access, not just sequential IDs. No confirmed IDOR still finishes with that summary.
