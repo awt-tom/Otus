@@ -39,7 +39,7 @@ scanning use `nuclei`; for content discovery `ffuf` — Burp is the manual hub t
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited); Burp Target scope restricted to in-scope hosts before testing
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); Burp Target scope restricted to in-scope hosts before testing
     verify: judge
     evidence: ../../scope.txt
     on_fail: fail

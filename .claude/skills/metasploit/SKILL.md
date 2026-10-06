@@ -39,7 +39,7 @@ when you don't want the full framework.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited); LHOST set for the lab network
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); LHOST set for the lab network
     verify: judge
     evidence: ../../scope.txt
     on_fail: fail
