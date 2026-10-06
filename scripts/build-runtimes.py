@@ -32,10 +32,10 @@ Claude Code and OpenCode read `.claude/skills/` natively (flat, one tool-named f
 - **Scanning / exploitation / post-exploitation** (nuclei, the web-vuln classes, `exploitation`,
   `ssh-foothold`, `metasploit`, `linpeas`, `privesc-root`, `netexec`, `bloodhound`, `impacket`,
   `hashcat`, `hydra`) → `vuln-hunter`.
-- **After every skill run**, hand the run dir to `reviewer` (which reads the `review` skill) before
-  results are treated as final.
+- **After every skill run**, hand the run dir and an actual UTC review timestamp to `reviewer`
+  (which reads the `review` skill) before results are final; it writes only its assigned review.json.
 - **At the end of an engagement** (or on request to write/summarize the report) → `reporter`. It
-  reads across `out/`, writes only under `out/<engagement>/report/`, produces markdown plus a
+  reads the configured evidence root, writes only under `<root>/<engagement>/report/`, produces markdown plus a
   branded self-contained HTML, and never contacts targets.
 
 A typical chain: `subfinder` → `httpx` → `port-scanner` + `ffuf` → `nuclei` → web-vuln classes →
@@ -55,7 +55,9 @@ spec in `docs/authoring.md`.
   exactly: keep skills flat at `.claude/skills/<tool>/SKILL.md`, never invent tool flags, and never
   restate this contract in a skill body — reference it with the single line
   `Shared contract: see AGENTS.md`.
-- Don't commit anything under `out/` (git-ignored evidence), and never add real credentials or scope
+- Skills call `scripts/otus-log.py` for scope checks, raw logs, events, and rendered findings.
+  Evidence uses `$OTUS_HOME` or `<repo>/out`; review/report direct-writing exceptions are above.
+- Don't commit engagement evidence (including custom `$OTUS_HOME` roots), or real credentials or scope
   notes to tracked files.
 """
 

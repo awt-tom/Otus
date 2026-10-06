@@ -35,7 +35,10 @@ def slug(value):
 
 
 def root():
-    return pathlib.Path(os.environ.get("OTUS_HOME", REPO / "out")).expanduser().resolve()
+    directory = pathlib.Path(os.environ.get("OTUS_HOME") or REPO / "out").expanduser().resolve()
+    if any(directory.is_relative_to(REPO / name) for name in (".claude/skills", ".git")):
+        raise ValueError("evidence root cannot be a skill directory or Git metadata")
+    return directory
 
 
 def inside(path, parent):
@@ -123,6 +126,8 @@ def pattern(value):
 def load_scope(engagement):
     path = inside(engagement_dir(engagement) / "scope.json", root())
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("scope must be a JSON object")
     if (data.get("schema") != "otus/scope@1" or data.get("engagement") != engagement
             or not isinstance(data.get("authorized_by"), str) or not data["authorized_by"].strip()
             or not isinstance(data.get("notes"), str)
@@ -220,6 +225,9 @@ def render(data):
                   "## Resolution options", *handback["resolution"], ""]
         if handback["block"]:
             lines += ["The run respected the block and attempted no retry/reword/split/background/bypass.", ""]
+    else:
+        lines += ["## Target state", handback["target_state"],
+                  "Cleanup: " + handback["cleanup"], *handback["artifacts"], ""]
     lines += ["## Findings"]
     for finding in data["findings"]:
         lines += ["", "### " + finding["title"], "Severity: " + finding["severity"],
@@ -242,8 +250,8 @@ def finalize(directory, data, status, summary, errors=(), **changes):
         raise ValueError("error runs require --error")
     if status == "complete" and data["handback"]["cleanup"] == "owed":
         raise ValueError("owed cleanup cannot be declared complete")
-    append_event(directory, "run_end", status=status)
     data["evidence"] = sorted(set(inventory(directory) + ["findings.md"]))
+    append_event(directory, "run_end", status=status)
     write_json(directory / "run.json", data)
     atomic(directory / "findings.md", render(data))
 
@@ -332,9 +340,12 @@ def run(args):
 
         def terminate(signum, frame):
             nonlocal interrupted
-            interrupted = True
+            interrupted = signum
             if process:
-                os.killpg(process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, terminate)
@@ -343,6 +354,11 @@ def run(args):
                 try:
                     process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                                stderr=subprocess.STDOUT, start_new_session=True)
+                    if interrupted:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                     while True:
                         chunk = process.stdout.read1(65536)
                         if not chunk:
@@ -357,11 +373,10 @@ def run(args):
                             pass
                     exit_code = process.wait()
                     exit_code = 128 - exit_code if exit_code < 0 else exit_code
+                    if interrupted:
+                        exit_code = 128 + interrupted
                 except OSError:
                     exit_code = 127
-                    transcript.write(b"Command could not be launched.\n")
-                    transcript.flush()
-                    os.fsync(transcript.fileno())
         finally:
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
@@ -417,8 +432,10 @@ def finish(args):
         handback = data["handback"]
         handback.update(target_state=args.target_state, cleanup=args.cleanup,
                         completed=args.completed, artifacts=args.artifact, resolution=args.resolution or handback["resolution"])
-        if args.cleanup == "verified" and not inside(directory / "loot/cleanup_verify.txt", directory).is_file():
-            raise ValueError("verified cleanup requires loot/cleanup_verify.txt")
+        if args.cleanup == "verified":
+            proof = inside(directory / "loot/cleanup_verify.txt", directory)
+            if not proof.is_file() or not proof.stat().st_size:
+                raise ValueError("verified cleanup requires nonempty loot/cleanup_verify.txt")
         if args.target_state == "changed" and args.cleanup not in ("owed", "verified"):
             raise ValueError("changed target requires owed or verified cleanup")
         finalize(directory, data, args.status, args.summary, args.error)

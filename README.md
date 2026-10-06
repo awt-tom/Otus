@@ -10,7 +10,7 @@ evidence trail, and completion check.
 
 > ⚠️ **Authorized use only.** These skills drive real offensive tools. Use them only against
 > targets you are explicitly permitted to test: in-scope bug-bounty programs, CTF/HTB labs, or
-> systems you own. Scope is confirmed **once per engagement** (recorded in `out/<engagement>/scope.txt`)
+> systems you own. Scope is confirmed **once per engagement** (recorded in engagement `scope.json`)
 > and inherited by every run; work stops if the target isn't confirmed in scope.
 
 ## How a skill works
@@ -25,11 +25,11 @@ Each `SKILL.md` is deliberately slim and tool-specific (see `templates/SKILL.tem
   the tool-unique verifiable items, and tool-specific pitfalls.
 - **Checklist** — a fenced `yaml` block of verifiable items (`verify: exists | nonempty |
   contains:<regex> | min-lines:<n> | exit-zero | judge`). The scope-confirmed item is always
-  `on_fail: fail` and references the inherited `out/<engagement>/scope.txt`. Any step that can
+  `on_fail: fail` and references the inherited engagement `scope.json`. Any step that can
   legitimately produce nothing still writes a marker file, so "ran but empty" ≠ "didn't run".
-- **Run record** — every run writes its evidence, `run.log`, a human-readable `findings.md`, and a
-  `run.json` into `out/<engagement>/<tool>/<timestamp>/` (anchored at the repo root). Output is never
-  written under `.claude/skills/`. `out/` is git-ignored.
+- **Evidence writer** — skills call `scripts/otus-log.py` for scope checks, raw `run.log`, versioned
+  `run.json` and `events.jsonl`, and rendered `findings.md`. Evidence goes under `$OTUS_HOME` or
+  repository `out/`, grouped by engagement/tool/UTC timestamp; never under skill directories.
 
 The behavioural rules every skill shares — authorization, evidence layout, the `run.json` schema,
 guardrail handling, non-interactive execution, cleanup verification — live **once** in
@@ -45,13 +45,14 @@ tool's install docs.
    capability — e.g. *"run the `port-scanner` skill against 10.10.10.5"*. The agent loads
    `.claude/skills/port-scanner/SKILL.md` and follows it.
 2. **Confirm scope once.** At the start of an engagement, confirm the target is authorized and
-   record it in `out/<engagement>/scope.txt`. Every skill inherits that single confirmation.
+  provide who authorized which targets; the helper records scope.json once. Every skill inherits it.
 3. **Pass arguments.** Each skill's frontmatter declares its `arguments` (e.g. `port-scanner` takes
    `target [ports]`, `subfinder` takes a domain).
-4. **Collect evidence.** Results, a `run.log`, a `findings.md`, and a `run.json` land in
-   `out/<engagement>/<tool>/<timestamp>/` (git-ignored).
-5. **Verify the run.** Hand the run directory to the `reviewer` (skill or subagent) to check it
-   against the skill's `## Checklist` and return a PASS / FAILED verdict.
+4. **Collect evidence.** Raw results, structured records/events, and rendered findings land under
+  the configured root. Use persistent storage or `otus-log.py archive --engagement "$ENGAGEMENT"`
+  and retain a verified downloaded archive outside an ephemeral runtime before teardown.
+5. **Verify the run.** Hand the run directory to the review skill or reviewer agent to check the
+  Checklist and write review.json. Reports consume independently reviewed evidence only.
 
 ## Runtimes
 
@@ -94,11 +95,11 @@ that run skills in isolated contexts:
   and returns a concise summary instead of raw dumps.
 - **`vuln-hunter`** — runs the scan → triage → (lab-only) exploit loop for nuclei and the
   web-vuln / exploitation skills.
-- **`reviewer`** — read-only; independently verifies a run against its `## Checklist` on disk and
-  returns a verdict (PASS / FAILED-RECOVERED / FAILED / NON-COMPLIANT).
-- **`reporter`** — read-only over `out/`; compiles the reviewed evidence into the final engagement
+- **`reviewer`** — evidence-read-only; independently verifies Checklist items, writes only assigned
+  review.json, and returns PASS / FAILED-RECOVERED / FAILED / NON-COMPLIANT.
+- **`reporter`** — reads the evidence root; compiles reviewed evidence into the final engagement
   report (canonical markdown plus a branded, self-contained HTML, print-ready via Save-as-PDF).
-  Writes only under `out/<engagement>/report/`.
+  Writes only under the configured engagement's report/.
 
 ## Repository layout
 
@@ -111,7 +112,7 @@ CLAUDE.md                        # GENERATED from AGENTS.md + Claude Code routin
 docs/authoring.md                # skill-authoring + verification spec, tool catalog, conventions
 docs/catalog.md                  # GENERATED human browse-index (by function + by domain)
 templates/                       # SKILL.template.md, report.css
-scripts/                         # build-runtimes.py, build-catalog.py
+scripts/                         # generators, otus-log.py, test-otus-log.py
 out/                             # timestamped run evidence, grouped by engagement (git-ignored)
 ```
 

@@ -12,7 +12,7 @@
 >
 > **Scope / authorization.** Every skill is for *authorized* work only — in-scope bug-bounty
 > programs, CTF/HTB labs, and systems you own or have written permission to test. Authorization is
-> confirmed **once per engagement** in `out/<engagement>/scope.txt` (see `AGENTS.md`); skills inherit
+> confirmed **once per engagement** in `<root>/<engagement>/scope.json` (see `AGENTS.md`); skills inherit
 > it and never re-confirm per run.
 >
 > **Researched:** Oct 2026 meta — the ProjectDiscovery suite dominates recon, `netexec` replaced
@@ -94,10 +94,9 @@ is **not** restated in it. Sections, in order:
   (scope-guard paragraph, run-dir anchoring, the `run.json` schema block, the generic guardrail note,
   "never write under skills/"). Do not re-state any of it.
 - **`## Goal`** — what a successful run produces and why you'd reach for it (1–2 sentences).
-- **`## Steps`** — numbered, executable: inputs/precondition (set up `$RUN` per AGENTS.md; scope is
-  already confirmed in `out/<engagement>/scope.txt`), exact command forms, decision points,
-  verify/triage, hand-off (write to `$RUN/`, name the next skill, write a marker file for
-  "ran but empty", write `run.json`).
+- **`## Steps`** — numbered, executable: helper init, scope-check, helper-wrapped original command
+  forms, decisions, triage, and finish. Preserve empty-result markers; the helper renders findings.md
+  and writes run.json/events.jsonl. GUI steps save exports and marker events, not fake commands.
 - **`## Modern tooling & alternatives`** — current best-in-class, notable flags, legacy tools replaced.
 - **`## Checklist`** — fenced YAML; the verification contract (spec in §8). First item is always the
   inherited `scope-confirmed` gate.
@@ -106,7 +105,62 @@ is **not** restated in it. Sections, in order:
 
 **Never invent a flag.** Use the exact command forms from the catalog entry (§5); if a flag isn't
 there, verify it against the tool's `--help` or official docs before writing it. A wrong flag is worse
-than an omission. Keep each `SKILL.md` ≤ 70 lines.
+than an omission. Keep each `SKILL.md` ≤ 75 lines.
+
+### 3.1 Evidence helper and storage
+
+The executable writer is `scripts/otus-log.py`, Python 3.12+ stdlib only on Linux/macOS; no network
+client or third-party dependencies. Invoke from the repository root with `python3 -I` so local
+module names/PYTHONPATH cannot shadow imports. Tool argv runs unchanged; only logging-only tees/spools
+are replaced. Catalog command examples in §5 are tool argv references, not permission to bypass
+the lifecycle in AGENTS.md. Real network tools are not required for the helper's self-tests.
+
+| Subcommand | Role |
+|---|---|
+| `scope-init --engagement S --authorized-by WHO --target T --confirmed` | Records explicit user authorization once; repeat target; optional note/force. Force requires user-approved replacement. |
+| `scope-check --engagement S [--target T] [--targets-file FILE] [--run-dir DIR]` | Checks authorization and every endpoint; exits 0/2/3. With run-dir, denied checks write error handback. |
+| `init --engagement S --skill NAME [--target T] [--run-dir DIR]` | Creates isolated partial record, events, raw log, and rendered findings; honors OTUS_RUN_DIR. |
+| `run --run-dir DIR [--target T] [--targets-file FILE] [--label L] -- CMD...` | Rechecks scope, closes stdin, captures raw combined output, records start/exit, returns original exit code. |
+| `event --run-dir DIR --event marker --note M` | Records actual manual work; guardrail_stop with block/request-id finalizes the required stop handback. |
+| `finish --run-dir DIR --status STATUS --summary S` | Finalizes records and renders findings; repeat item/finding/error/completed/artifact/resolution flags as needed. |
+| `archive --engagement S [--out FILE]` | Creates a private tar.gz outside the engagement; refuses overwrite, symlinks, and recursive self-inclusion. |
+
+`finish` accepts `--item 'id=ok|fail:evidence'` and
+`--finding 'title=...;severity=...;evidence=...'`, with optional target/description/reproduction/remediation.
+Use an evidence file for descriptions containing semicolons. Also supply observed `--target-state`
+and `--cleanup`; verified cleanup needs `loot/cleanup_verify.txt`. Never paste secrets into summaries,
+event notes, findings, or report text. Executable arguments are redacted from JSON; raw transcripts
+and tool-native files remain private and may contain secrets. Record failures rather than treating
+any nonzero as success; a terminal error may be enriched but never reopened.
+
+The four canonical models live ONLY in AGENTS.md's **Versioned JSON models** section:
+`otus/scope@1` (authorization), `otus/run@1` (run/findings/handback), `otus/event@1` (timeline),
+and `otus/review@1` (independent verdict). Link to them; do not copy schema definitions into skills.
+Standalone review writes its verdict through the reviewer-role exception; locked reviewer/report
+agents never invoke Python. Their direct Write outputs follow the same models and are independently
+checked. Legacy evidence remains untouched and excluded until independently reviewed.
+
+Evidence root is `OTUS_HOME` or repository `out/`; it is per engagement, not per session. A custom
+root must also be outside tracked files (add a local ignore if necessary); never commit evidence.
+For ephemeral Codespaces/Claude runtimes, mount persistent storage or export before teardown:
+
+```bash
+python3 -I scripts/otus-log.py archive --engagement "$ENGAGEMENT" --out /persistent/path/evidence.tar.gz
+tar -tzf /persistent/path/evidence.tar.gz
+```
+
+Download an archive made inside an ephemeral runtime, extract it in a private directory, verify
+scope/run/event/review/raw evidence is present, and retain it outside the runtime. Restore the original
+mounted evidence path when resuming absolute run_dir records. For relocated archives, disclose original
+paths during read-only review; do not rewrite source records silently. An archive still inside a
+disposable runtime is not durable. Stop active runs before archiving for a consistent snapshot.
+JSON replacement is atomic, but multi-file writes/teardown cannot be made transactional by instructions;
+an unfinished partial record is never promoted to complete.
+
+Verification: `python3 -I scripts/test-otus-log.py` uses synthetic fixtures/temp directories,
+covering scope gates, failures/signals, raw output, ordering, escaping, archive restoration, and
+skill/agent wiring. After a contract or routing edit, run `python3 -I scripts/build-runtimes.py`;
+the first generation changes adapters, and a second generation must produce no additional diff.
 
 ---
 
@@ -487,9 +541,9 @@ It declares each required part *and how to verify it from evidence*. (Example in
 ```yaml
 checklist:
   - id: scope-confirmed            # stable, unique within the skill; ALWAYS first
-    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
+    desc: Explicit engagement authorization and applicable endpoints checked
     verify: judge
-    evidence: ../../scope.txt      # the inherited engagement scope file
+    evidence: ../../scope.json     # inherited engagement authorization
     on_fail: fail
     required: true
   - id: <step-id>
@@ -525,12 +579,12 @@ checklist:
 - Every item points at **evidence the step actually writes.** If a step can produce nothing checkable,
   make it write a marker file (e.g. `echo "no findings" > nuclei.txt`) so "ran but found nothing" ≠
   "didn't run".
-- The **scope gate is always `on_fail: fail`** and references the inherited `../../scope.txt` — never
+- The **scope gate is always `on_fail: fail`** and references inherited `../../scope.json` — never
   retry your way past an unconfirmed target, and never re-confirm scope per run.
 - Prefer `contains:`/`min-lines:` over bare `exists` so an empty/garbage file doesn't pass.
 - Keep it to the parts that matter — 4–8 items per skill is typical.
 
-> The run record the executing skill writes (`run.json`) and its schema, the error-handback
+> The run record the helper writes (`run.json`) and its schema, the error-handback
 > `findings.md` shape, and the timestamp/self-report/cleanup invariants the reviewer also checks all
 > live in **`AGENTS.md`**. This guide does not duplicate them.
 
@@ -546,14 +600,14 @@ agent that didn't produce the work.
 is mandatory on any terminal run; missing/unparseable → FAIL) → **re-verify every item independently**
 (don't trust `run.json` item `ok`) → check the cross-cutting invariants from `AGENTS.md` (timestamp
 sanity, self-report consistency, cross-run contamination, cleanup state) → decide → remediate within
-bounded retries → write `<run_dir>/review.md`.
+bounded retries through an authorized executor → write `<run_dir>/review.json` via Write.
 
 **Decision logic (summary).** Let `F` = required items that failed.
 - Missing/unparseable `run.json`, a guardrail-bypass attempt, or any cross-cutting invariant violation
   → **FAIL** (not retryable).
 - `F` empty and invariants hold → **PASS.**
-- Any `F` item is `on_fail: fail` (e.g. scope gate), or `run.json.status == error` → **FAIL** (a
-  respected guardrail block is reported as a clean, user-actionable FAIL).
+- Any `F` item is `on_fail: fail`, or a hard tool error occurred, -> FAIL. The respected-guardrail
+  compliance exception follows AGENTS.md; it is not proof of a completed action or finding.
 - Else isolated evidence-producing failures within budget → **REDO-PART**; else within skill budget →
   **REDO-SKILL**; else retries exhausted → **FAIL.**
 
@@ -565,7 +619,7 @@ bounded by `max_part_retries` / `max_skill_retries`; a redo targets only the spe
 
 | Verdict | Meaning | What happens |
 |---|---|---|
-| `PASS` | All required items verified | `review.md` written; proceed |
+| `PASS` | Required work or stop compliance independently verified | `review.json` written; do not infer unperformed work |
 | `FAILED-RECOVERED` | Some items failed but a bounded redo fixed them | report notes the redo; proceed |
 | `FAILED` | Unrecoverable or retries exhausted | user told which parts, what was tried, the cause, the decision needed |
 | `NON-COMPLIANT` | Target skill has no `## Checklist` | can't be verified → treated as fail; add a checklist |
@@ -612,8 +666,8 @@ These are **optional** patterns for the `reporter` agent, kept here (not hardcod
 ### A.1 Two-phase HTB attack-chain narrative
 
 When an engagement splits cleanly at a privilege boundary (common on HTB/OSCP boxes), the attack-chain
-narrative reads well in two phases with any platform guardrail as the pivot — all times in UTC, in
-true chronological order, derived from the **run-dir `<timestamp>`** (not `run.json` `started`/`finished`):
+narrative reads well in two phases with any platform guardrail as the pivot. Use events.jsonl UTC
+times and per-run seq; merging concurrent runs does not establish causality:
 
 - **Phase 1 — Foothold & user flag:** recon → scan → the exploited vulnerability → initial RCE as the
   service user → user flag.
@@ -624,8 +678,8 @@ true chronological order, derived from the **run-dir `<timestamp>`** (not `run.j
 - **Phase 2 — Privilege escalation & root flag:** the successful privesc run (via the identified
   misconfiguration / vector) → root → root flag, **after** the guardrail was resolved.
 
-Footnote that raw `run.json` `started`/`finished` timestamps are unreliable (known clock bug) and that
-the run-dir `<timestamp>` values are authoritative and were used for all ordering.
+Missing/legacy timelines are disclosed as unverified; never invent events or derive command times
+from folder names. Helper-produced UTC timestamps need no legacy clock workaround.
 
 ### A.2 Windows / Active Directory remediation mappings
 

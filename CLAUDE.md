@@ -4,7 +4,7 @@
 # Otus — Agent Contract
 
 Otus is a library of offensive-security **skills** (per-tool runbooks under `.claude/skills/`) that
-an LLM agent loads on demand, follows, and files evidence for under `out/`. This file is the single
+an LLM agent loads on demand, follows, and files evidence under `$OTUS_HOME` (default `out/`). This file is the single
 source of truth for how every skill and agent must behave, independent of runtime. `CLAUDE.md` and
 `.github/copilot-instructions.md` are **generated** from this file (see `scripts/build-runtimes.py`);
 edit the contract here, never in the generated copies.
@@ -14,8 +14,12 @@ Every rule below is stated **once**. A skill body references it with a single li
 
 ## Authorization & scope gate (hard)
 All work is lab/authorized only — in-scope bug-bounty programs, CTF/HTB labs, or systems you own.
-Confirm the target is in scope **once per engagement**, at the very start, and record that
-confirmation in `out/<engagement>/scope.txt`. Every skill run **inherits** that single confirmation —
+Confirm the target is in scope **once per engagement**, at the very start. Record ONLY the user's
+explicit authorization (who + targets) with `python3 -I scripts/otus-log.py scope-init --engagement
+"$ENGAGEMENT" --authorized-by "$WHO" --target "$TARGET" --confirmed`. Repeat `--target` as needed.
+The agent NEVER invents targets or authorization, or writes scope to pass its own gate. `--confirmed`
+asserts a real user confirmation, not agent approval; the file is a record, not proof of identity.
+`--force` requires explicit user approval of the replacement allowlist. Every skill run **inherits** that confirmation —
 do **not** re-confirm scope per run or per prompt. If scope is unclear, STOP and ask — never scan or
 exploit an unconfirmed target. After that one confirmation, proceed autonomously through the planned
 in-scope steps and the normal chain — report progress, but do **not** pause to ask "should I
@@ -42,54 +46,139 @@ skill directly and follow the same chain manually.
 CTF reverse-engineering and forensics skills (`ghidra`, `pwntools`, `binwalk`, `steghide`,
 `wireshark`) slot in wherever the challenge requires them.
 
-## Evidence layout
-Everything for one engagement is grouped under its own git-ignored folder:
+## Evidence storage and writers
+Evidence root is `$OTUS_HOME` if set, otherwise `<repo>/out` (gitignored). Anchor helper invocations
+to the repo root; `python3 -I scripts/otus-log.py` uses its repository location for the default.
+An **engagement**, not a session, is the report unit and can span sessions:
 
+```text
+<root>/<engagement>/
+  scope.json
+  <skill>/<UTC-timestamp>/
+    run.json       # structured run + findings, atomic replacement
+    events.jsonl   # append-only event objects, per-run seq is authoritative ordering
+    review.json    # independent reviewer verdict
+    run.log        # RAW combined stdout/stderr, never JSON or a narrative
+    findings.md    # rendered from run.json
+    notes/         # decisions, transport, DNS workaround
+    evidence/      # raw scans, requests, screenshots
+    loot/          # secrets, flags, cleanup_verify.txt
+  report/          # reporter-only output and timestamped compilation records
 ```
-out/<engagement>/
-  scope.txt                       # ONE scope/authorization confirmation, inherited by every run
-  <skill>/<timestamp>/
-    run.json        # run record (schema below) — written on EVERY terminal outcome
-    review.md       # reviewer verdict (written by the reviewer)
-    findings.md     # human-readable result summary the reporter reads first
-    run.log         # raw tee of the commands run
-    notes/          # dns-workaround.txt, candidates, etc.
-    evidence/       # raw tool output, scans, screenshots
-    loot/           # creds, flags, cleanup_verify.txt (secrets only here, never in tracked files)
+
+`<engagement>` and `<skill>` are path-free slugs. The helper mints microsecond UTC names
+`YYYYmmddTHHMMSSffffffZ`; pinned `--run-dir` / `$OTUS_RUN_DIR` must be NEW and directly below
+`<root>/<engagement>/<skill>/`. Never overwrite a sibling run or follow evidence symlinks.
+**Never write engagement artifacts under `.claude/skills/`**; editing runbooks during repository
+maintenance is distinct from executing them.
+
+- **Skills, recon-runner, vuln-hunter:** write records via `scripts/otus-log.py`, never hand-roll JSON
+  or write `findings.md` themselves. Raw tool output and tool-native JSON remain unchanged.
+- **Reviewer (including the standalone review skill's verdict):** writes only its assigned run's
+  `review.json` via Write, using the schema below; this verdict is the exception to the skill JSON rule.
+  Verification has no target contact and requires no Python/general shell permission.
+  The coordinator supplies an actual UTC review timestamp to the locked reviewer agent.
+- **Reporter:** writes its own report `run.json`, `events.jsonl`, and a matching rendered `findings.md`
+  via Write, with the same schemas. This is the only direct-writing run-record exception; preserve
+  its locked shell. Its compilation notes live in `notes/`, not the raw `run.log`.
+
+Use a persistent mounted `$OTUS_HOME` across ephemeral runtimes, or export with
+`python3 -I scripts/otus-log.py archive --engagement "$ENGAGEMENT" --out /persistent/path/evidence.tar.gz`.
+Otherwise download the archive **before teardown**, open it to verify the expected records, and
+retain it outside the ephemeral runtime. A different directory or an undownloaded archive is NOT
+durable storage. Archives contain secrets: restrict access and never commit them. The helper uses
+private directories/files, fsync, per-run locks, and atomic JSON replacement; disk failure, SIGKILL,
+or teardown can still interrupt a write. No helper can promise a final record after sudden destruction.
+
+## Logging lifecycle and scope checks
+Set `ENGAGEMENT` from the user, and `TARGET`/`HOSTS` from the skill inputs. First create a local
+partial record with `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill NAME)"`.
+Then call `scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"` **before any active action**:
+use `--target "$TARGET"` for each contacted endpoint, or `--targets-file "$HOSTS"` for EVERY entry
+of a plain host/URL list. URLs normalize to hosts; DNS matches are case-insensitive, IPs canonical,
+allowlists accept exact hosts, `*.example.test` globs, or CIDRs. Exit 2 means invalid/unmatched target;
+exit 3 means missing/invalid authorization. Either stops the run and records an error, not a guardrail.
+Initializing a denied run creates no scope or target contact. Never pass an unchecked list or follow
+an unchecked redirect. If scope is ambiguous or list contents are not plain hosts/URLs, STOP and ask.
+
+Offline artifact work (including hashcat) and read-only review check engagement scope only; remote
+pwntools and any other network action always check the actual endpoint. Reporter is exempt because
+it never contacts a target. Scope is rechecked by every helper `run`; pass the applicable `--target`
+or `--targets-file` each time. A command that can discover/change endpoints needs a fresh check before
+contacting them; helper checks do not sandbox a tool's internal networking.
+
+Wrap executable argv as `python3 -I scripts/otus-log.py run --run-dir "$RUN" [scope options] -- CMD...`.
+Keep the tool's flags/arguments unchanged. Remove only logging tees/spools aimed at `run.log`: the
+helper must be its sole writer. Preserve tool-native output files. For essential shell pipelines,
+export needed variables and wrap `bash -o pipefail -c '<original pipeline without run.log tee>'`;
+never turn an argv command into an interpolated shell string unnecessarily. Close stdin and keep
+the existing timeout/non-interactive rules. GUI/manual steps save exports and use `event --event marker`
+to record what was actually done, never invent a shell command or a successful scan.
+
+`run` records `cmd_start` before launch, then `cmd` with exit status, and returns the tool's exit code.
+Nonzero exits, failed launch, or caught interruption finalize as error. Stop immediately; enrich an
+error with `finish --status error` and cleanup/completed/resolution fields as needed, without further
+active steps. Tool-specific benign nonzero outcomes must be explained in the handback, never relabeled
+as success automatically. Successful commands leave the run partial until explicit `finish`.
+SIGKILL/teardown may leave an unfinished partial record: reviewers must not promote it.
+
+Finish every observed terminal outcome with `finish --status complete|partial|error --summary ...`,
+repeated `--item 'id=ok|fail:evidence'`, and `--finding 'title=...;severity=...;evidence=...'` for real
+confirmed findings. Never claim checklist items passed without evidence; triage remains mandatory.
+Evidence paths are run-relative, except inherited `../../scope.json`. Findings require actual files;
+metadata and summaries contain no secret values. Command arguments are conservatively redacted from
+events; labels/notes must also be secret-free. Raw transcripts can contain secrets, so they remain
+private evidence, never report text. `run.json` evidence inventory lists the files actually present.
+
+### Versioned JSON models (canonical)
+These four object shapes are defined ONLY here. All fields shown are required unless marked optional
+below. An unfinished run has `finished: null` and `status: partial`; a terminal record has UTC
+`finished >= started`. `status` is `complete|partial|error`; error requires nonempty `errors`.
+`target_state` is `unknown|unchanged|changed`; `cleanup` is `unknown|not-needed|verified|owed`.
+Changed state requires `verified` or `owed`; verified requires positive `loot/cleanup_verify.txt`.
+Unknown state must never be rendered as unchanged or clean. Findings severity is
+`info|low|medium|high|critical`; optional finding strings: `target`, `description`, `reproduction`,
+`remediation`. CLI finding fields are semicolon-separated; use an evidence document for text containing
+semicolons. `items` is keyed by checklist ID; the reviewer independently verifies each assertion.
+
+**scope.json — authorization record**
+```json
+{"schema":"otus/scope@1","engagement":"acme-htb","authorized_by":"tom","date":"2026-10-06","targets":["10.10.11.42","*.acme.htb"],"notes":"Explicit user confirmation"}
 ```
 
-- `<engagement>` is a short slug the user provides (e.g. `acme-htb`); `<timestamp>` is
-  `YYYYmmddTHHMMSSZ` (UTC). Anchor to the repo root via `git rev-parse --show-toplevel`.
-- An agent may pin a run dir by exporting `OTUS_RUN_DIR`; otherwise the skill mints a unique one.
-  Each run writes **only** into its own dir — never share a dir a sibling could overwrite.
-- **Never** write under `.claude/skills/`. Bloating the skill folder degrades the agent.
-
-## Run record (`run.json`)
-Write this lightweight record into the run dir on **every** terminal outcome (success, partial, or
-error) before handback. A run that produced evidence but no parseable `run.json` is a defect — the
-reviewer fails it.
-
+**run.json — run, evidence, findings, and error handback**
 ```json
 {
-  "skill": "<skill name>",
-  "engagement": "<engagement slug>",
-  "run_dir": "out/<engagement>/<skill>/<timestamp>",
-  "target": "<target tested>",
-  "started": "<ISO-8601 UTC>",
-  "finished": "<ISO-8601 UTC, >= started>",
-  "status": "complete | partial | error",
-  "summary": "<one line: what was found / what failed>",
-  "evidence": ["findings.md", "evidence/<file>", "loot/<file>"],
-  "items": { "<checklist-id>": { "ok": true, "evidence": "<path>" } },
-  "errors": []
+  "schema":"otus/run@1","skill":"nuclei","engagement":"acme-htb",
+  "run_dir":"/evidence/acme-htb/nuclei/20261006T120000000000Z","target":"",
+  "started":"2026-10-06T12:00:00.000000Z","finished":"2026-10-06T12:01:00.000000Z",
+  "status":"complete","summary":"No verified findings",
+  "evidence":["events.jsonl","run.log","findings.md","triage.md"],
+  "items":{"scope-confirmed":{"ok":true,"evidence":"../../scope.json"}},
+  "findings":[],"errors":[],
+  "handback":{"completed":[],"target_state":"unchanged","cleanup":"not-needed",
+    "artifacts":[],"resolution":[],"block":"","request_id":""}
 }
 ```
 
-Capture `started`/`finished` from the **same** clock (`date -u +%Y-%m-%dT%H:%M:%SZ`), with
-`finished >= started`. On a hard failure (tool missing, network blocked, auth rejected, out of scope)
-set `status: error` and push a human-readable line to `errors[]` so the reviewer fails fast instead
-of retrying. The `scope-confirmed` checklist item points at the inherited `out/<engagement>/scope.txt`
-(relative path `../../scope.txt` from a run dir).
+**events.jsonl — one object per line**
+```json
+{"schema":"otus/event@1","ts":"2026-10-06T12:00:01.000000Z","seq":2,"run_dir":"/evidence/acme-htb/nuclei/20261006T120000000000Z","event":"cmd_start","command":{"executable":"nuclei","arguments":"[redacted]"},"label":"scan"}
+```
+`event` is `run_start|cmd_start|cmd|marker|guardrail_stop|run_end`. Optional fields: `command`,
+`label`, integer `exit`, `note`, `block`, `request_id`, `status`. Sequence is increasing within each
+run, not a global clock; merge runs by UTC `ts` with run_dir/seq as a deterministic tie-breaker,
+never claim a causal order for concurrent equal-time events. Error enrichment adds a later run_end.
+
+**review.json — independent verdict**
+```json
+{"schema":"otus/review@1","run_dir":"/evidence/acme-htb/nuclei/20261006T120000000000Z","reviewed":"2026-10-06T12:02:00.000000Z","verdict":"PASS","items":{"scope-confirmed":{"ok":true,"evidence":"../../scope.json","reason":"Explicit allowlist checked"}},"invariants":{"run-record":{"ok":true,"reason":"Valid terminal record"}},"actions":[],"summary":"Required items independently verified"}
+```
+Verdict is `PASS|FAILED-RECOVERED|FAILED|NON-COMPLIANT`. A respected guardrail may receive PASS for
+compliance, but is not a completed exploit or confirmed finding. Reporter promotes only evidence-backed
+findings with PASS/FAILED-RECOVERED verdicts. Keep existing legacy evidence untouched: records without
+these schemas are excluded as legacy/unverified until independently reviewed under this contract;
+do not silently fabricate scope or events to migrate them.
 
 ### Error-handback `findings.md`
 Any `status: error` run (hard error **or** guardrail block) must leave a `findings.md` with, in order:
@@ -168,10 +257,10 @@ Claude Code and OpenCode read `.claude/skills/` natively (flat, one tool-named f
 - **Scanning / exploitation / post-exploitation** (nuclei, the web-vuln classes, `exploitation`,
   `ssh-foothold`, `metasploit`, `linpeas`, `privesc-root`, `netexec`, `bloodhound`, `impacket`,
   `hashcat`, `hydra`) → `vuln-hunter`.
-- **After every skill run**, hand the run dir to `reviewer` (which reads the `review` skill) before
-  results are treated as final.
+- **After every skill run**, hand the run dir and an actual UTC review timestamp to `reviewer`
+  (which reads the `review` skill) before results are final; it writes only its assigned review.json.
 - **At the end of an engagement** (or on request to write/summarize the report) → `reporter`. It
-  reads across `out/`, writes only under `out/<engagement>/report/`, produces markdown plus a
+  reads the configured evidence root, writes only under `<root>/<engagement>/report/`, produces markdown plus a
   branded self-contained HTML, and never contacts targets.
 
 A typical chain: `subfinder` → `httpx` → `port-scanner` + `ffuf` → `nuclei` → web-vuln classes →

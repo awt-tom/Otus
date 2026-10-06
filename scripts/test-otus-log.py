@@ -1,8 +1,10 @@
 """No-network lifecycle tests; all evidence is synthetic and temporary."""
 
 import json
+import ast
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -92,6 +94,7 @@ class LoggingTests(unittest.TestCase):
         directory = self.start()
         self.call("run", "--run-dir", str(directory), "--", "/nonexistent/otus-test-command", code=127)
         self.assertEqual(self.record(directory)["status"], "error")
+        self.assertEqual((directory / "run.log").read_bytes(), b"")
 
     def test_all_batch_targets_are_checked(self):
         self.authorize()
@@ -139,7 +142,7 @@ class LoggingTests(unittest.TestCase):
     def test_timeout_and_signal_finalize_error(self):
         self.authorize()
         for command, exit_code in (("import sys; sys.exit(124)", 124),
-                                   ("import os, signal; os.kill(os.getppid(), signal.SIGTERM)", 137)):
+                                   ("import os, signal; os.kill(os.getppid(), signal.SIGTERM)", 143)):
             directory = self.start()
             self.call("run", "--run-dir", str(directory), "--", sys.executable, "-c", command, code=exit_code)
             self.assertEqual(self.record(directory)["status"], "error")
@@ -156,8 +159,9 @@ class LoggingTests(unittest.TestCase):
     def test_symlinks_and_invalid_scope_are_rejected(self):
         self.authorize()
         scope = self.home / "test/scope.json"
-        scope.write_text('{"schema": "bad"}')
-        self.call("scope-check", "--engagement", "test", code=3)
+        for malformed in ('{"schema": "bad"}', "[]", "null", "false", "42"):
+            scope.write_text(malformed)
+            self.call("scope-check", "--engagement", "test", code=3)
         directory = self.start()
         (directory / "evidence/link").symlink_to(pathlib.Path(self.temporary.name))
         self.call("finish", "--run-dir", str(directory), "--status", "complete", "--summary", "reject symlink", code=1)
@@ -165,6 +169,127 @@ class LoggingTests(unittest.TestCase):
     def test_authorization_requires_explicit_confirmation(self):
         self.call("scope-init", "--engagement", "test", "--authorized-by", "test", "--target", "example.test", code=1)
         self.assertFalse((self.home / "test/scope.json").exists())
+
+    def test_partial_cleanup_is_visible_in_rendered_findings(self):
+        directory = self.start()
+        self.call("finish", "--run-dir", str(directory), "--status", "partial", "--summary", "Unfinished",
+                  "--target-state", "changed", "--cleanup", "owed", "--artifact", "synthetic artifact")
+        self.assertIn("Cleanup: owed", (directory / "findings.md").read_text())
+        self.assertIn("synthetic artifact", (directory / "findings.md").read_text())
+
+    def test_pipeline_preserves_upstream_failure(self):
+        self.authorize()
+        directory = self.start()
+        self.call("run", "--run-dir", str(directory), "--", "/bin/bash", "-o", "pipefail", "-c",
+                  "printf 'one raw line\\n'; false | cat", code=1)
+        self.assertEqual((directory / "run.log").read_text(), "one raw line\n")
+
+    def test_json_escaping_and_evidence_inventory(self):
+        directory = self.start()
+        summary = 'Quoted "text", slash \\, and newline\n'
+        self.call("finish", "--run-dir", str(directory), "--status", "partial", "--summary", summary)
+        self.assertEqual(self.record(directory)["summary"], summary)
+        for filename in ("run.json", "events.jsonl", "run.log", "findings.md"):
+            self.assertIn(filename, self.record(directory)["evidence"])
+
+    def test_parallel_events_have_unique_ordered_sequences(self):
+        directory = self.start()
+        processes = [subprocess.Popen([sys.executable, "-I", str(HELPER), "event", "--run-dir", str(directory),
+                                       "--event", "marker", "--note", "synthetic step"], env=self.env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE) for index in range(6)]
+        for process in processes:
+            output, errors = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, errors.decode())
+        events = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
+        self.assertEqual([event["seq"] for event in events], list(range(1, 8)))
+
+    def test_default_root_is_repo_out_without_writing_there(self):
+        environment = dict(self.env)
+        environment.pop("OTUS_HOME")
+        result = subprocess.run([sys.executable, "-I", "-c",
+                                 "import runpy, sys; print(runpy.run_path(sys.argv[1])['root']())", str(HELPER)],
+                                env=environment, capture_output=True, timeout=10, check=True)
+        self.assertEqual(pathlib.Path(result.stdout.decode().strip()), HELPER.parent.parent / "out")
+
+    def test_archive_restores_every_evidence_file(self):
+        directory = self.start()
+        self.call("finish", "--run-dir", str(directory), "--status", "partial", "--summary", "Synthetic")
+        destination = pathlib.Path(self.temporary.name) / "export.tar.gz"
+        self.call("archive", "--engagement", "test", "--out", str(destination))
+        restored = pathlib.Path(self.temporary.name) / "restored"
+        with tarfile.open(destination) as bundle:
+            bundle.extractall(restored, filter="data")
+        for original in (self.home / "test").rglob("*"):
+            if original.is_file():
+                self.assertEqual(original.read_bytes(), (restored / original.relative_to(self.home)).read_bytes())
+
+    def test_skill_root_is_rejected(self):
+        self.env["OTUS_HOME"] = str(HELPER.parent.parent / ".claude/skills")
+        self.call("init", "--engagement", "test", "--skill", "nuclei", code=1)
+
+
+class WiringTests(unittest.TestCase):
+    def test_all_skills_use_helper_and_versioned_scope(self):
+        skills = list((HELPER.parent.parent / ".claude/skills").glob("*/SKILL.md"))
+        self.assertEqual(len(skills), 26)
+        for path in skills:
+            with self.subTest(skill=path.parent.name):
+                text = path.read_text()
+                for subcommand in ("init --engagement", "scope-check --engagement", "run --run-dir", "finish --run-dir"):
+                    self.assertIn(subcommand, text)
+                self.assertIn("evidence: ../../scope.json", text)
+                self.assertIn("## Checklist", text)
+                self.assertLessEqual(len(text.splitlines()), 75)
+                self.assertNotRegex(text, r"(?:echo|printf).*\{.*schema")
+                self.assertNotRegex(text, r"tee.*\$RUN/run\.log")
+                self.assertNotIn("scope.txt", text)
+                self.assertNotIn("review.md", text)
+
+    def test_scope_modes_and_locked_agent_writers(self):
+        repo = HELPER.parent.parent
+        for skill in ("binwalk", "ghidra", "steghide", "wireshark", "hashcat", "review"):
+            text = (repo / ".claude/skills" / skill / "SKILL.md").read_text()
+            gates = re.findall(r"scripts/otus-log\.py scope-check[^`]+", text)
+            self.assertTrue(gates)
+            self.assertTrue(all("--target" not in gate for gate in gates), skill)
+        pwn = (repo / ".claude/skills/pwntools/SKILL.md").read_text()
+        self.assertIn('scope-check --engagement "$ENGAGEMENT" --target "$HOST"', pwn)
+        for name in ("reviewer", "reporter"):
+            text = (repo / ".claude/agents" / (name + ".md")).read_text()
+            tools = next(line for line in text.splitlines() if line.startswith("tools:"))
+            self.assertIn("Write", tools)
+            self.assertNotIn("python", tools)
+            self.assertNotIn("scope.txt", text)
+            self.assertNotIn("review.md", text)
+            self.assertIn("review.json", text)
+            self.assertIn("scope.json", text)
+        reporter = (repo / ".claude/agents/reporter.md").read_text()
+        self.assertIn("events.jsonl", reporter)
+        self.assertIn("inline it **verbatim**", reporter)
+        self.assertIn("Save-as-PDF", reporter)
+        self.assertNotIn("clock bug", reporter)
+
+    def test_helper_imports_are_stdlib_only(self):
+        tree = ast.parse(HELPER.read_text())
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imports.add(node.module.split(".")[0])
+        self.assertTrue(imports.issubset(sys.stdlib_module_names))
+        self.assertFalse(imports & {"socket", "http", "requests", "httpx"})
+
+    def test_runtime_adapters_match_canonical_generator(self):
+        script = HELPER.with_name("build-runtimes.py")
+        sources = [HELPER.parent.parent / "CLAUDE.md", HELPER.parent.parent / ".github/copilot-instructions.md"]
+        before = [path.read_bytes() for path in sources]
+        import runpy
+        module = runpy.run_path(str(script))
+        contract = (HELPER.parent.parent / "AGENTS.md").read_text()
+        for path, appendix in module["TARGETS"].items():
+            self.assertEqual(path.read_text(), module["render"](contract, appendix))
+        self.assertEqual(before, [path.read_bytes() for path in sources])
 
 
 if __name__ == "__main__":
