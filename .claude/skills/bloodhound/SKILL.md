@@ -28,7 +28,7 @@ as each new identity is gained, since paths change.
    (never write under `skills/`); collect *into* it so artifacts are self-contained:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_bloodhound="${OTUS_RUN_DIR:-$ROOT/out/bloodhound/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_bloodhound="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/bloodhound/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_bloodhound"
    mkdir -p "$RUN/collection" "$RUN/notes"
    DOMAIN="${1:?domain required}"
@@ -50,13 +50,13 @@ as each new identity is gained, since paths change.
    gained — paths change:
    ```bash
    if [ -n "$(ls -A "$RUN/collection" 2>/dev/null)" ]; then
-     echo "bloodhound: collection imported; paths in findings.md" > "$RUN/summary.txt"
+    echo "bloodhound: collection imported; paths in findings.md" >> "$RUN/findings.md"
    else
-     echo "no collection produced" > "$RUN/summary.txt"
+    echo "no collection produced" >> "$RUN/findings.md"
    fi
    grep -qiE '^\- ' "$RUN/findings.md" || echo "- none: no attack path identified this collection" >> "$RUN/findings.md"
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats).
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats).
 
 ## Modern tooling & alternatives
 BloodHound **CE** (Community Edition) is current — match the collector to the CE ingest version.
@@ -65,21 +65,24 @@ Collectors: `bloodhound-python` (remote, no host access), `SharpHound` (on a dom
 
 ## Output formats
 JSON/zip collection (saved in `$RUN/collection/`); graph UI in BloodHound CE; Cypher query exports.
-This skill also writes `$RUN/findings.md` (attack paths + the Cypher used), `$RUN/summary.txt`
-(run marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+This skill also writes `$RUN/findings.md` (attack paths + the Cypher used and run marker),
+`$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "bloodhound",
+  "engagement": "<engagement slug>",
   "target": "<domain>",
-  "run_dir": "out/bloodhound/<timestamp>",
+  "run_dir": "out/<engagement>/bloodhound/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md", "collection"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "collected":        { "attempted": true, "ok": true, "evidence": "collection" },
-    "paths-analyzed":   { "attempted": true, "ok": true, "evidence": "findings.md" },
-    "results-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "collected":        { "ok": true, "evidence": "collection" },
+    "paths-analyzed":   { "ok": true, "evidence": "findings.md" },
+    "results-recorded": { "ok": true, "evidence": "findings.md" }
   },
   "errors": []
 }
@@ -116,7 +119,7 @@ checklist:
   - id: results-recorded
     desc: Run marker written (even when no path identified)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
 ```
@@ -126,12 +129,12 @@ checklist:
 - **Match the collector version to the BloodHound CE ingest version**, or import fails / misparses.
 - **Re-collect as each new identity is gained** — attack paths change with new group membership.
 - Keep Cypher queries in RAG, not hardcoded here, so the library stays current.
-- A run that finds no path must still write `summary.txt` and a `- none` line in `findings.md` so
+- A run that finds no path must still write a run marker and a `- none` line in `findings.md` so
   "ran but empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/bloodhound/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/bloodhound/<timestamp>/` (git-ignored).

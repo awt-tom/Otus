@@ -27,7 +27,7 @@ concrete, verified escalation path.
    output pulled back from the target:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_linpeas="${OTUS_RUN_DIR:-$ROOT/out/linpeas/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_linpeas="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/linpeas/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_linpeas"
    mkdir -p "$RUN/notes"
    echo "foothold host confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -49,10 +49,10 @@ concrete, verified escalation path.
 5. **Exploit the most reliable path + marker.** Verify before firing; pick the most reliable vector.
    Always write a run marker so "ran but nothing obvious" ≠ "didn't run":
    ```bash
-   if [ -s "$RUN/notes/vectors.md" ]; then echo "linpeas: candidate vectors recorded" > "$RUN/summary.txt";
-   else echo "no obvious privesc vector" > "$RUN/summary.txt"; echo "- none identified" >> "$RUN/notes/vectors.md"; fi
+   if [ -s "$RUN/notes/vectors.md" ]; then echo "linpeas: candidate vectors recorded" > "$RUN/findings.md";
+   else echo "no obvious privesc vector" > "$RUN/findings.md"; echo "- none identified" >> "$RUN/notes/vectors.md"; fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats).
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats).
 
 ## Modern tooling & alternatives
 PEASS-ng: `linpeas.sh` (Linux), `winPEASx64.exe` (Windows). Companions: `pspy` (watch cron/processes
@@ -62,20 +62,23 @@ pivot to `mimikatz` / `impacket secretsdump`.
 ## Output formats
 Colorized stdout (`-a` runs all checks); tee/pipe to a file for review — retrieved into
 `$RUN/linpeas.txt`. This skill also writes `$RUN/notes/vectors.md` (candidate vectors + abuse
-commands), `$RUN/summary.txt` (run marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+commands), `$RUN/findings.md` (run marker), `$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "linpeas",
+  "engagement": "<engagement slug>",
   "target": "<foothold host>",
-  "run_dir": "out/linpeas/<timestamp>",
+  "run_dir": "out/<engagement>/linpeas/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "enum-captured":    { "attempted": true, "ok": true, "evidence": "linpeas.txt" },
-    "vectors-analyzed": { "attempted": true, "ok": true, "evidence": "notes/vectors.md" },
-    "results-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "enum-captured":    { "ok": true, "evidence": "linpeas.txt" },
+    "vectors-analyzed": { "ok": true, "evidence": "notes/vectors.md" },
+    "results-recorded": { "ok": true, "evidence": "findings.md" }
   },
   "errors": []
 }
@@ -112,7 +115,7 @@ checklist:
   - id: results-recorded
     desc: Run marker written (even when no vector found)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
 ```
@@ -124,12 +127,12 @@ checklist:
   kernel exploits can crash the host.
 - Triage red/yellow highlights, not the whole dump — then map to a concrete GTFOBins/LOLBAS command.
 - `pspy` catches root cron/processes that a one-shot linpeas run can miss.
-- A run that finds no vector must still write `summary.txt` and a `- none` line in `vectors.md` so
+- A run that finds no vector must still write `findings.md` and a `- none` line in `vectors.md` so
   "ran but empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/linpeas/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/linpeas/<timestamp>/` (git-ignored).

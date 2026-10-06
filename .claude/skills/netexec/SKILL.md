@@ -28,7 +28,7 @@ loot (creds/hashes) to `impacket` and BloodHound, with the full transcript captu
    timestamped run directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_netexec="${OTUS_RUN_DIR:-$ROOT/out/netexec/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_netexec="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/netexec/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_netexec"
    mkdir -p "$RUN/notes"
    TARGETS="${1:?targets (host/CIDR/file) required}"
@@ -51,12 +51,12 @@ loot (creds/hashes) to `impacket` and BloodHound, with the full transcript captu
    ```bash
    cp -a "$HOME/.nxc/." "$RUN/nxc-db/" 2>/dev/null || true
    if grep -qiE '\(Pwn3d!\)|\[\+\]' "$RUN/run.log"; then
-     echo "netexec: valid access/creds found (see run.log + notes/loot.md)" > "$RUN/summary.txt"
+    echo "netexec: valid access/creds found (see run.log + notes/loot.md)" > "$RUN/findings.md"
    else
-     echo "no valid access confirmed" > "$RUN/summary.txt"; echo "none" >> "$RUN/notes/loot.md"
+    echo "no valid access confirmed" > "$RUN/findings.md"; echo "none" >> "$RUN/notes/loot.md"
    fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats). Feed creds/hashes
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed creds/hashes
    to `impacket` / BloodHound.
 
 ## Modern tooling & alternatives
@@ -67,20 +67,23 @@ for cracking recovered hashes.
 ## Output formats
 Colorized CLI; persistent loot DB under `~/.nxc/` (copied into `$RUN/nxc-db/`); `--log` mirrors
 output to `$RUN/run.log`. This skill also writes `$RUN/notes/loot.md` (creds/shares/hashes),
-`$RUN/summary.txt` (run marker), and a run record `$RUN/_run.json`:
+`$RUN/findings.md` (run marker), and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "netexec",
+  "engagement": "<engagement slug>",
   "target": "<targets>",
-  "run_dir": "out/netexec/<timestamp>",
+  "run_dir": "out/<engagement>/netexec/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "auth-enumerated":  { "attempted": true, "ok": true, "evidence": "run.log", "exit": 0 },
-    "results-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" },
-    "lockout-safe":     { "attempted": true, "ok": true, "evidence": "notes/scope.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "auth-enumerated":  { "ok": true, "evidence": "run.log" },
+    "results-recorded": { "ok": true, "evidence": "findings.md" },
+    "lockout-safe":     { "ok": true, "evidence": "notes/scope.txt" }
   },
   "errors": []
 }
@@ -112,7 +115,7 @@ checklist:
   - id: results-recorded
     desc: Run marker written (even when no access/creds found)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
   - id: lockout-safe
@@ -129,12 +132,12 @@ checklist:
 - Always try **null / guest** before using credentials.
 - Use `netexec`, not the retired `crackmapexec`.
 - Loot persists in `~/.nxc/` across runs — copy it into the run dir for self-contained evidence.
-- A run that confirms nothing must still write `summary.txt` ("no valid access confirmed") and
+- A run that confirms nothing must still write `findings.md` ("no valid access confirmed") and
   `notes/loot.md` so "ran but empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/netexec/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/netexec/<timestamp>/` (git-ignored).

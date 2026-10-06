@@ -28,7 +28,7 @@ session / post-exploitation — with the full console transcript captured for th
    Anchor a timestamped run directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_metasploit="${OTUS_RUN_DIR:-$ROOT/out/metasploit/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_metasploit="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/metasploit/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_metasploit"
    mkdir -p "$RUN/notes"
    RHOST="${1:?target_host required}"; LHOST="${3:-<your-lhost>}"
@@ -54,13 +54,13 @@ session / post-exploitation — with the full console transcript captured for th
    marker so "ran but no session" ≠ "didn't run":
    ```bash
    if grep -qiE "session [0-9]+ opened|Meterpreter session|Command shell session" "$RUN/run.log"; then
-     echo "metasploit: session opened (see run.log + workspace.xml)" > "$RUN/summary.txt"
+    echo "metasploit: session opened (see run.log + workspace.xml)" > "$RUN/findings.md"
    else
-     echo "no session — module(s) tried, no shell" > "$RUN/summary.txt"
+    echo "no session — module(s) tried, no shell" > "$RUN/findings.md"
      echo "none opened" >> "$RUN/notes/modules.txt"
    fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats).
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats).
 
 ## Modern tooling & alternatives
 `msfconsole` is still the standard framework. For manual / OSCP-style work prefer single exploits
@@ -70,21 +70,24 @@ payloads/shellcode when you don't want the full framework.
 ## Output formats
 Console output; `spool <file>` mirrors the session to `$RUN/run.log`; loot/notes live in the
 workspace DB and are exported via `db_export -f xml` to `$RUN/workspace.xml`. This skill also writes
-`$RUN/notes/modules.txt` (modules + options tried), `$RUN/summary.txt` (run marker), and a run
-record `$RUN/_run.json`:
+`$RUN/notes/modules.txt` (modules + options tried), `$RUN/findings.md` (run marker), and a run
+record `$RUN/run.json`:
 ```json
 {
   "skill": "metasploit",
+  "engagement": "<engagement slug>",
   "target": "<target_host>",
-  "run_dir": "out/metasploit/<timestamp>",
+  "run_dir": "out/<engagement>/metasploit/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed": { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "module-selected": { "attempted": true, "ok": true, "evidence": "notes/modules.txt" },
-    "run-executed":    { "attempted": true, "ok": true, "evidence": "summary.txt" },
-    "check-before-run":{ "attempted": true, "ok": true, "evidence": "run.log" }
+    "scope-confirmed": { "ok": true, "evidence": "notes/scope.txt" },
+    "module-selected": { "ok": true, "evidence": "notes/modules.txt" },
+    "run-executed":    { "ok": true, "evidence": "findings.md" },
+    "check-before-run":{ "ok": true, "evidence": "run.log" }
   },
   "errors": []
 }
@@ -115,7 +118,7 @@ checklist:
   - id: run-executed
     desc: Module executed; run marker written (even if no session opened)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
   - id: check-before-run
@@ -133,12 +136,12 @@ checklist:
 - Set `LHOST` to the correct interface for the lab/engagement network, or your payload never calls
   back.
 - For OSCP-style manual work, prefer single `searchsploit`/GitHub exploits over the framework.
-- A run that opens no session must still write `summary.txt` ("no session …") and
+- A run that opens no session must still write `findings.md` ("no session …") and
   `notes/modules.txt` so "ran but empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/metasploit/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/metasploit/<timestamp>/` (git-ignored).

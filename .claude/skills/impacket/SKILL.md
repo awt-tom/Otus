@@ -29,7 +29,7 @@ the report and the credential store.
    Anchor a timestamped run directory to the repo root (never write under `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_impacket="${OTUS_RUN_DIR:-$ROOT/out/impacket/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_impacket="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/impacket/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_impacket"
    mkdir -p "$RUN/loot" "$RUN/notes"
    echo "target + creds confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -56,12 +56,12 @@ the report and the credential store.
    ```bash
    ntlmrelayx.py -tf targets.txt -smb2support -of "$RUN/loot/relay"   | tee -a "$RUN/run.log"   # -i for interactive
    if [ -n "$(ls -A "$RUN/loot" 2>/dev/null)" ] || grep -qiE '\[\*\]|\[\+\]' "$RUN/run.log"; then
-     echo "impacket: action completed; artifacts in loot/" > "$RUN/summary.txt"
+    echo "impacket: action completed; artifacts in loot/" > "$RUN/findings.md"
    else
-     echo "no artifacts captured" > "$RUN/summary.txt"
+    echo "no artifacts captured" > "$RUN/findings.md"
    fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats). Feed roast hashes
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed roast hashes
    to `hashcat`; cracked creds loop back to `netexec`.
 
 ## Modern tooling & alternatives
@@ -71,21 +71,24 @@ Impacket is the standard AD protocol toolkit — install via `pipx install impac
 
 ## Output formats
 CLI output (mirrored to `$RUN/run.log` via `tee`); dumped secrets/tickets written under `$RUN/loot/`
-via each script's `-outputfile`. This skill also writes `$RUN/summary.txt` (run marker) and a run
-record `$RUN/_run.json`:
+via each script's `-outputfile`. This skill also writes `$RUN/findings.md` (run marker) and a run
+record `$RUN/run.json`:
 ```json
 {
   "skill": "impacket",
+  "engagement": "<engagement slug>",
   "target": "<target>",
-  "run_dir": "out/impacket/<timestamp>",
+  "run_dir": "out/<engagement>/impacket/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "action-executed":  { "attempted": true, "ok": true, "evidence": "run.log" },
-    "loot-captured":    { "attempted": true, "ok": true, "evidence": "loot" },
-    "results-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "action-executed":  { "ok": true, "evidence": "run.log" },
+    "loot-captured":    { "ok": true, "evidence": "loot" },
+    "results-recorded": { "ok": true, "evidence": "findings.md" }
   },
   "errors": []
 }
@@ -123,7 +126,7 @@ checklist:
   - id: results-recorded
     desc: Run marker written (even when no artifacts captured)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
 ```
@@ -135,12 +138,12 @@ checklist:
   minimum needed.
 - Request roast hashes with `-format hashcat` (GetNPUsers) so they drop straight into `hashcat`.
 - `psexec` creates a service (noisy/forensic); prefer `wmiexec`/`smbexec` when stealth matters.
-- A run that captures nothing must still write `summary.txt` ("no artifacts captured") so "ran but
+- A run that captures nothing must still write `findings.md` ("no artifacts captured") so "ran but
   empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/impacket/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/impacket/<timestamp>/` (git-ignored).

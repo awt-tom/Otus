@@ -28,7 +28,7 @@ lateral movement, with cracked creds recorded for the report.
    directory to the repo root (never write under `skills/`); fail fast on an empty hash file:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_hashcat="${OTUS_RUN_DIR:-$ROOT/out/hashcat/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_hashcat="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/hashcat/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_hashcat"
    mkdir -p "$RUN/notes"
    HASHES="${1:?path to hashes file required}"; MODE="${2:?hashcat -m mode required}"; WL="${3:-/usr/share/wordlists/rockyou.txt}"
@@ -50,12 +50,12 @@ lateral movement, with cracked creds recorded for the report.
    ```bash
    hashcat -m "$MODE" "$HASHES" --show > "$RUN/show.txt" 2>>"$RUN/run.log" || true
    if [ -s "$RUN/cracked.txt" ] || [ -s "$RUN/show.txt" ]; then
-     echo "hashcat: $(wc -l < "$RUN/cracked.txt" 2>/dev/null || echo 0) cracked (see cracked.txt / show.txt)" > "$RUN/summary.txt"
+    echo "hashcat: $(wc -l < "$RUN/cracked.txt" 2>/dev/null || echo 0) cracked (see cracked.txt / show.txt)" > "$RUN/findings.md"
    else
-     echo "no hashes cracked" > "$RUN/summary.txt"
+    echo "no hashes cracked" > "$RUN/findings.md"
    fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats). Feed cracked creds
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed cracked creds
    to `netexec` / login skills.
 
 ## Modern tooling & alternatives
@@ -66,20 +66,23 @@ wordlist + rules strategy ladder rather than brute-forcing blindly.
 ## Output formats
 Potfile at `~/.hashcat/hashcat.potfile` (global cracked store); `--outfile` writes cracked
 hash:plain to `$RUN/cracked.txt`; `--show` lists cracked to `$RUN/show.txt`. This skill also writes
-`$RUN/summary.txt` (run marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+`$RUN/findings.md` (run marker), `$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "hashcat",
+  "engagement": "<engagement slug>",
   "target": "<hashes_file>",
-  "run_dir": "out/hashcat/<timestamp>",
+  "run_dir": "out/<engagement>/hashcat/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md", "cracked.txt", "show.txt"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "mode-identified":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "crack-attempted":  { "attempted": true, "ok": true, "evidence": "summary.txt" },
-    "cracked-recorded": { "attempted": true, "ok": true, "evidence": "cracked.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "mode-identified":  { "ok": true, "evidence": "notes/scope.txt" },
+    "crack-attempted":  { "ok": true, "evidence": "findings.md" },
+    "cracked-recorded": { "ok": true, "evidence": "cracked.txt" }
   },
   "errors": []
 }
@@ -110,7 +113,7 @@ checklist:
   - id: crack-attempted
     desc: Cracking executed (wordlist→rules→mask ladder); run marker written
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
   - id: cracked-recorded
@@ -127,12 +130,12 @@ checklist:
 - Pick `-m <mode>` from the hash type first; a wrong mode wastes the whole run.
 - The potfile caches results — `--show` re-lists cracked hashes instantly without re-cracking.
 - `*2john` / jumbo converters bridge archive/doc formats into crackable hashes.
-- A run that cracks nothing must still write `summary.txt` ("no hashes cracked") so "ran but empty"
+- A run that cracks nothing must still write `findings.md` ("no hashes cracked") so "ran but empty"
   ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/hashcat/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/hashcat/<timestamp>/` (git-ignored).

@@ -28,7 +28,7 @@ first stage of attack-surface mapping — a clean host list ready to resolve and
    `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_subfinder="${OTUS_RUN_DIR:-$ROOT/out/subfinder/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_subfinder="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/subfinder/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_subfinder"
    mkdir -p "$RUN/notes"
    echo "domain=$domain confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
@@ -51,14 +51,14 @@ first stage of attack-surface mapping — a clean host list ready to resolve and
    ```bash
    count="$( [ -f "$RUN/subs.txt" ] && wc -l < "$RUN/subs.txt" | tr -d ' ' || echo 0 )"
    if [ "$count" -gt 0 ]; then
-     echo "subfinder: $count subdomains for $domain" > "$RUN/summary.txt"
+    echo "subfinder: $count subdomains for $domain" > "$RUN/findings.md"
    else
-     echo "no subdomains found" > "$RUN/summary.txt"
+    echo "no subdomains found" > "$RUN/findings.md"
      : > "$RUN/subs.txt"   # ensure a clean (empty) list file exists for downstream
    fi
    ```
 5. **Hand-off.** Feed `subs.txt` to `dnsx` (resolve/validate) → `httpx` (live HTTP hosts) →
-   `nuclei`/`katana`. Then write the run record `_run.json` into `$RUN/` (schema in Output formats).
+  `nuclei`/`katana`. Then write the run record `run.json` into `$RUN/` (schema in Output formats).
 6. Hand the run dir to the `reviewer` subagent to verify before treating results as final.
 
 ## Modern tooling & alternatives
@@ -69,20 +69,23 @@ ProjectDiscovery `subfinder` is the standard for passive discovery. Pair it with
 ## Output formats
 Plaintext list (one subdomain per line) via `-o`; JSON lines (host + source) via `-oJ`. Save the
 clean list to `$RUN/subs.txt` (and optional `$RUN/subs.jsonl`). The executor also writes a run
-record `$RUN/_run.json`:
+record `$RUN/run.json` and marker `$RUN/findings.md`:
 ```json
 {
   "skill": "subfinder",
+  "engagement": "<engagement slug>",
   "target": "<domain>",
-  "run_dir": "out/subfinder/<timestamp>",
+  "run_dir": "out/<engagement>/subfinder/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed": { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "enum-ran":        { "attempted": true, "ok": true, "evidence": "summary.txt", "exit": 0 },
-    "subdomains-found":{ "attempted": true, "ok": true, "evidence": "subs.txt" },
-    "handoff-written": { "attempted": true, "ok": true, "evidence": "subs.txt" }
+    "scope-confirmed": { "ok": true, "evidence": "notes/scope.txt" },
+    "enum-ran":        { "ok": true, "evidence": "findings.md" },
+    "subdomains-found":{ "ok": true, "evidence": "subs.txt" },
+    "handoff-written": { "ok": true, "evidence": "subs.txt" }
   },
   "errors": []
 }
@@ -108,7 +111,7 @@ checklist:
   - id: enum-ran
     desc: Passive enumeration executed; run marker written (even if empty)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
   - id: subdomains-found
@@ -129,14 +132,14 @@ checklist:
 - **Passive only** — low noise and a safe default; it does not actively resolve or brute-force
   DNS (that is `dnsx`/brute skills downstream).
 - Rate-limit API sources via the provider config to stay within source limits and program rules.
-- A run that legitimately finds nothing must still write `summary.txt` ("no subdomains found")
+- A run that legitimately finds nothing must still write `findings.md` ("no subdomains found")
   and a clean empty `subs.txt`, so "ran but empty" ≠ "didn't run".
 - Keep `subs.txt` a pure host list — never write the empty marker into it (it is fed verbatim to
-  `dnsx`/`httpx`); the marker goes in `summary.txt`.
+  `dnsx`/`httpx`); the marker goes in `findings.md`.
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/subfinder/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/subfinder/<timestamp>/` (git-ignored).

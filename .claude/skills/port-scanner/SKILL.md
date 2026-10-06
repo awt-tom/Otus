@@ -27,7 +27,7 @@ and network-scope recon pass.
    `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_port_scanner="${OTUS_RUN_DIR:-$ROOT/out/port-scanner/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_port_scanner="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/port-scanner/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_port_scanner"
    started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    mkdir -p "$RUN/scans" "$RUN/notes"
@@ -49,7 +49,7 @@ and network-scope recon pass.
    ```bash
    if [ -z "$ports" ]; then
      echo "no open ports" > "$RUN/scans/detail.nmap"
-     echo "no open ports" > "$RUN/summary.txt"
+    echo "no open ports" > "$RUN/findings.md"
      exit 0
    fi
    ```
@@ -65,11 +65,11 @@ and network-scope recon pass.
    ```
 6. **Hand-off / branch.** Summarize open services for downstream skills and write the run record:
    ```bash
-   { echo "# $target"; grep -E '^[0-9]+/(tcp|udp)[[:space:]]+open' "$RUN/scans/detail.nmap" 2>/dev/null || echo "no open ports"; } > "$RUN/summary.txt"
+   { echo "# $target"; grep -E '^[0-9]+/(tcp|udp)[[:space:]]+open' "$RUN/scans/detail.nmap" 2>/dev/null || echo "no open ports"; } > "$RUN/findings.md"
    ```
    Then branch by service to per-service skills (SMB → enum4linux-ng/smbmap, HTTP(S) → httpx
    / ffuf / web skills), and feed `detail.xml` to exploit lookup (`searchsploit --nmap`).
-7. **Write the run record** `_run.json` into `$RUN/` (schema in Output formats) capturing intent,
+7. **Write the run record** `run.json` into `$RUN/` (schema in Output formats) capturing intent,
    per-item status, exit codes, and any hard errors.
 
 ## Modern tooling & alternatives
@@ -81,20 +81,23 @@ Use NSE (`--script`) for scripted per-service checks.
 `-oA <basename>` emits all three formats at once: normal (`.nmap`), greppable (`.gnmap`), and
 XML (`.xml`). The XML feeds `searchsploit --nmap` and reporting; the greppable file is easiest
 to parse for open ports. All scans save under `$RUN/scans/`. The executor also writes a run
-record `$RUN/_run.json`:
+record `$RUN/run.json`:
 ```json
 {
   "skill": "port-scanner",
+  "engagement": "<engagement slug>",
   "target": "<target>",
-  "run_dir": "out/port-scanner/<timestamp>",
+  "run_dir": "out/<engagement>/port-scanner/<timestamp>",
   "started": "<started: date -u +%Y-%m-%dT%H:%M:%SZ, ISO-8601 UTC>",
   "finished": "<finished: date -u at finish; must be >= started>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md", "scans/allports.nmap", "scans/detail.nmap"],
   "items": {
-    "scope-confirmed": { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "allports-scan":   { "attempted": true, "ok": true, "evidence": "scans/allports.nmap", "exit": 0 },
-    "service-detail":  { "attempted": true, "ok": true, "evidence": "scans/detail.nmap",   "exit": 0 },
-    "handoff-written": { "attempted": true, "ok": true, "evidence": "summary.txt" }
+    "scope-confirmed": { "ok": true, "evidence": "notes/scope.txt" },
+    "allports-scan":   { "ok": true, "evidence": "scans/allports.nmap" },
+    "service-detail":  { "ok": true, "evidence": "scans/detail.nmap" },
+    "handoff-written": { "ok": true, "evidence": "findings.md" }
   },
   "errors": []
 }
@@ -132,7 +135,7 @@ checklist:
   - id: handoff-written
     desc: Open services summarized for downstream skills
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-part
     required: false
 ```
@@ -145,14 +148,14 @@ checklist:
 - `-Pn` treats the host as online (skips host discovery) — correct when ICMP is filtered, but
   it can hide that a host is actually down.
 - A step that legitimately finds nothing (no open ports) must still write a "no open ports"
-  marker to both `scans/detail.nmap` and `summary.txt` so "ran but empty" ≠ "didn't run".
+  marker to both `scans/detail.nmap` and `findings.md` so "ran but empty" ≠ "didn't run".
 - **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
   save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
   hard-verify it.
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write scan output under `skills/`; the run directory is always anchored to the repo
-  root via `git rev-parse --show-toplevel` under `out/port-scanner/<timestamp>/` (git-ignored).
+  root via `git rev-parse --show-toplevel` under `out/<engagement>/port-scanner/<timestamp>/` (git-ignored).

@@ -28,7 +28,7 @@ skills.
    `skills/`):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_hydra="${OTUS_RUN_DIR:-$ROOT/out/hydra/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_hydra="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/hydra/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_hydra"
    mkdir -p "$RUN/notes"
    TARGET="${1:?target host required}"; SERVICE="${2:?service (ssh/ftp/http-post-form/...) required}"
@@ -50,12 +50,12 @@ skills.
 4. **Record result + marker.** Always write a run marker so "ran but nothing" ≠ "didn't run":
    ```bash
    if grep -qiE '\[[0-9]+\]\[[a-z-]+\] host:|login:.*password:' "$RUN/found.txt" 2>/dev/null; then
-     echo "hydra: valid login(s) found (see found.txt)" > "$RUN/summary.txt"
+    echo "hydra: valid login(s) found (see found.txt)" > "$RUN/findings.md"
    else
-     echo "no valid credentials found" > "$RUN/summary.txt"
+    echo "no valid credentials found" > "$RUN/findings.md"
    fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats). Feed valid creds to
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed valid creds to
    login / AD / web skills.
 
 ## Modern tooling & alternatives
@@ -65,20 +65,23 @@ alternatives, and `netexec` is preferred for SMB/WinRM/LDAP spraying at scale (l
 
 ## Output formats
 Text results (and `-b json` / `jsonv1` for structured) written via `-o` to `$RUN/found.txt`. This
-skill also writes `$RUN/summary.txt` (run marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+skill also writes `$RUN/findings.md` (run marker), `$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "hydra",
+  "engagement": "<engagement slug>",
   "target": "<target> <service>",
-  "run_dir": "out/hydra/<timestamp>",
+  "run_dir": "out/<engagement>/hydra/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "attack-ran":       { "attempted": true, "ok": true, "evidence": "run.log" },
-    "results-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" },
-    "lockout-safe":     { "attempted": true, "ok": true, "evidence": "notes/scope.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "attack-ran":       { "ok": true, "evidence": "run.log" },
+    "results-recorded": { "ok": true, "evidence": "findings.md" },
+    "lockout-safe":     { "ok": true, "evidence": "notes/scope.txt" }
   },
   "errors": []
 }
@@ -109,7 +112,7 @@ checklist:
   - id: results-recorded
     desc: Run marker written (even when no creds found)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
   - id: lockout-safe
@@ -127,12 +130,12 @@ checklist:
   the spec against a known-bad login first.
 - `-f` stops after the first valid pair per host; drop it to enumerate all.
 - For SMB/WinRM/LDAP at scale prefer `netexec` (lockout-aware); for offline hashes use `hashcat`.
-- A run that finds nothing must still write `summary.txt` ("no valid credentials found") so "ran but
+- A run that finds nothing must still write `findings.md` ("no valid credentials found") so "ran but
   empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/hydra/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/hydra/<timestamp>/` (git-ignored).

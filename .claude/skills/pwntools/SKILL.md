@@ -27,7 +27,7 @@ flag.
    mitigations (`checksec` → RELRO/NX/PIE/canary) — they dictate the technique:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_pwntools="${OTUS_RUN_DIR:-$ROOT/out/pwntools/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_pwntools="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/pwntools/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_pwntools"
    mkdir -p "$RUN/notes"
    BIN="${1:?path to target binary required}"
@@ -54,9 +54,9 @@ flag.
    python3 "$RUN/exploit.py" BIN="$BIN"                                 2>&1 | tee -a "$RUN/run.log"   # local
    python3 "$RUN/exploit.py" BIN="$BIN" HOST="${2:-}" PORT="${3:-}"     2>&1 | tee -a "$RUN/run.log"   # remote
    grep -oE '([A-Za-z0-9_]+\{[^}]+\}|flag\{[^}]+\})' "$RUN/run.log" | sort -u > "$RUN/flag.txt" || true
-   [ -s "$RUN/flag.txt" ] && echo "pwntools: flag captured" > "$RUN/summary.txt" || echo "no flag yet — exploit in progress" > "$RUN/summary.txt"
+   [ -s "$RUN/flag.txt" ] && echo "pwntools: flag captured" > "$RUN/findings.md" || echo "no flag yet — exploit in progress" > "$RUN/findings.md"
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats).
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats).
 
 ## Modern tooling & alternatives
 `pwntools` + `gdb` with `pwndbg` or `GEF`; `ROPgadget` / `ropper` for gadgets; `one_gadget` for libc
@@ -65,21 +65,24 @@ one-shot shells; `angr` for symbolic execution; `checksec` for mitigations. Pair
 
 ## Output formats
 The exploit script itself (`$RUN/exploit.py`) + the captured flag (`$RUN/flag.txt`); structured logs
-via `context.log_level`. This skill also writes `$RUN/notes/checksec.txt`, `$RUN/summary.txt` (run
-marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+via `context.log_level`. This skill also writes `$RUN/notes/checksec.txt`, `$RUN/findings.md` (run
+marker), `$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "pwntools",
+  "engagement": "<engagement slug>",
   "target": "<binary>[ @ host:port]",
-  "run_dir": "out/pwntools/<timestamp>",
+  "run_dir": "out/<engagement>/pwntools/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed": { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "binary-triaged":  { "attempted": true, "ok": true, "evidence": "notes/checksec.txt" },
-    "exploit-built":   { "attempted": true, "ok": true, "evidence": "exploit.py" },
-    "result-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" }
+    "scope-confirmed": { "ok": true, "evidence": "notes/scope.txt" },
+    "binary-triaged":  { "ok": true, "evidence": "notes/checksec.txt" },
+    "exploit-built":   { "ok": true, "evidence": "exploit.py" },
+    "result-recorded": { "ok": true, "evidence": "findings.md" }
   },
   "errors": []
 }
@@ -116,7 +119,7 @@ checklist:
   - id: result-recorded
     desc: Run marker written (flag captured, or "in progress")
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
 ```
@@ -129,12 +132,12 @@ checklist:
 - Match the challenge libc exactly (use the provided libc / `pwninit`); a wrong libc breaks
   ret2libc / one_gadget offsets.
 - `checksec` first — mitigations (NX/PIE/canary/RELRO) decide the whole approach.
-- A run without a flag yet must still write `summary.txt` ("in progress") so "ran but empty" ≠
+- A run without a flag yet must still write `findings.md` ("in progress") so "ran but empty" ≠
   "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/pwntools/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/pwntools/<timestamp>/` (git-ignored).

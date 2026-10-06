@@ -26,7 +26,7 @@ cracking it with stegseek + a wordlist — and capture the extracted payload for
    is readable without a passphrase):
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_steghide="${OTUS_RUN_DIR:-$ROOT/out/steghide/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_steghide="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/steghide/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_steghide"
    mkdir -p "$RUN"
    SF="${1:?path to stego file required}"
@@ -51,10 +51,10 @@ cracking it with stegseek + a wordlist — and capture the extracted payload for
    ```
 5. **Marker + hand-off.** Always write a run marker so "tried but empty" ≠ "didn't run":
    ```bash
-   if [ -s "$RUN/extracted.bin" ]; then echo "steghide: payload extracted (see extracted.bin)" > "$RUN/summary.txt";
-   else echo "no payload extracted (no match / wrong passphrase)" > "$RUN/summary.txt"; fi
+   if [ -s "$RUN/extracted.bin" ]; then echo "steghide: payload extracted (see extracted.bin)" > "$RUN/findings.md";
+   else echo "no payload extracted (no match / wrong passphrase)" > "$RUN/findings.md"; fi
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats). Hand the payload to
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Hand the payload to
    RE / crypto / `binwalk` follow-ups.
 
 ## Modern tooling & alternatives
@@ -64,20 +64,23 @@ crack protected archives/docs. Pick the tool by container type — steghide ≠ 
 
 ## Output formats
 Extracted payload file (`$RUN/extracted.bin`); `steghide info` report (`$RUN/info.txt`). This skill
-also writes `$RUN/summary.txt` (run marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+also writes `$RUN/findings.md` (run marker), `$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "steghide",
+  "engagement": "<engagement slug>",
   "target": "<stego_file>",
-  "run_dir": "out/steghide/<timestamp>",
+  "run_dir": "out/<engagement>/steghide/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "scope.txt" },
-    "probed":           { "attempted": true, "ok": true, "evidence": "info.txt" },
-    "extract-attempted":{ "attempted": true, "ok": true, "evidence": "summary.txt" },
-    "payload-recorded": { "attempted": true, "ok": true, "evidence": "extracted.bin" }
+    "scope-confirmed":  { "ok": true, "evidence": "scope.txt" },
+    "probed":           { "ok": true, "evidence": "info.txt" },
+    "extract-attempted":{ "ok": true, "evidence": "findings.md" },
+    "payload-recorded": { "ok": true, "evidence": "extracted.bin" }
   },
   "errors": []
 }
@@ -108,7 +111,7 @@ checklist:
   - id: extract-attempted
     desc: Extraction (and/or stegseek crack) attempted; run marker written
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
   - id: payload-recorded
@@ -126,12 +129,12 @@ checklist:
 - `stegseek` is thousands of times faster than legacy crackers and runs rockyou in seconds; use it
   when the passphrase is unknown. `stegseek --seed` detects steghide data without a password.
 - Always `file`/`strings` the extracted payload — it may itself be another container to carve.
-- A run that extracts nothing must still write `summary.txt` ("no payload extracted") so "ran but
+- A run that extracts nothing must still write `findings.md` ("no payload extracted") so "ran but
   empty" ≠ "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/steghide/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/steghide/<timestamp>/` (git-ignored).

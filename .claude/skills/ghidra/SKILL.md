@@ -26,7 +26,7 @@ the exploit or solve step.
    directory to the repo root (never write under `skills/`) and do quick triage first:
    ```bash
    ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_ghidra="${OTUS_RUN_DIR:-$ROOT/out/ghidra/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+   OTUS_RUN_ghidra="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/ghidra/$(date -u +%Y%m%dT%H%M%SZ)}"
    RUN="$OTUS_RUN_ghidra"
    mkdir -p "$RUN/project" "$RUN/notes"
    BIN="${1:?path to target binary required}"
@@ -50,10 +50,10 @@ the exploit or solve step.
    `z3`/Python script (solve). Always write a run marker so "analyzed but no answer yet" ≠ "didn't
    run":
    ```bash
-   grep -qiE '^\- ' "$RUN/findings.md" && echo "ghidra: logic/constraints recorded" > "$RUN/summary.txt" \
-     || { echo "analysis in progress — no conclusion yet" > "$RUN/summary.txt"; echo "- in progress" >> "$RUN/findings.md"; }
+   grep -qiE '^\- ' "$RUN/findings.md" && echo "ghidra: logic/constraints recorded" >> "$RUN/findings.md" \
+     || { echo "analysis in progress — no conclusion yet" >> "$RUN/findings.md"; echo "- in progress" >> "$RUN/findings.md"; }
    ```
-   Then write the run record `_run.json` into `$RUN/` (schema in Output formats).
+  Then write the run record `run.json` into `$RUN/` (schema in Output formats).
 
 ## Modern tooling & alternatives
 Ghidra (free, NSA) is the default decompiler; `IDA Free`, `Binary Ninja`, `radare2`/`Cutter`,
@@ -62,21 +62,24 @@ Ghidra (free, NSA) is the default decompiler; `IDA Free`, `Binary Ninja`, `radar
 
 ## Output formats
 Decompiled pseudocode + an annotated project (`$RUN/project/`); exported C / notes. This skill also
-writes `$RUN/notes/triage.txt`, `$RUN/findings.md` (recovered logic/constraints), `$RUN/summary.txt`
-(run marker), `$RUN/run.log`, and a run record `$RUN/_run.json`:
+writes `$RUN/notes/triage.txt`, `$RUN/findings.md` (recovered logic/constraints and run marker),
+`$RUN/run.log`, and a run record `$RUN/run.json`:
 ```json
 {
   "skill": "ghidra",
+  "engagement": "<engagement slug>",
   "target": "<binary>",
-  "run_dir": "out/ghidra/<timestamp>",
+  "run_dir": "out/<engagement>/ghidra/<timestamp>",
   "started": "<ISO8601>",
   "finished": "<ISO8601>",
   "status": "complete",
+  "summary": "<one line>",
+  "evidence": ["findings.md", "notes/triage.txt", "project"],
   "items": {
-    "scope-confirmed":  { "attempted": true, "ok": true, "evidence": "notes/scope.txt" },
-    "analyzed":         { "attempted": true, "ok": true, "evidence": "project" },
-    "logic-extracted":  { "attempted": true, "ok": true, "evidence": "findings.md" },
-    "results-recorded": { "attempted": true, "ok": true, "evidence": "summary.txt" }
+    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
+    "analyzed":         { "ok": true, "evidence": "project" },
+    "logic-extracted":  { "ok": true, "evidence": "findings.md" },
+    "results-recorded": { "ok": true, "evidence": "findings.md" }
   },
   "errors": []
 }
@@ -113,7 +116,7 @@ checklist:
   - id: results-recorded
     desc: Run marker written (even when no conclusion yet)
     verify: nonempty
-    evidence: summary.txt
+    evidence: findings.md
     on_fail: redo-skill
     required: true
 ```
@@ -126,12 +129,12 @@ checklist:
 - Rename/annotate as you go; the decompiler output is a starting point, not ground truth — verify
   against disassembly on tricky functions.
 - Hand the recovered constraints to `z3`/`pwntools` rather than solving by hand.
-- A run with no conclusion yet must still write `summary.txt` ("in progress") so "ran but empty" ≠
+- A run with no conclusion yet must still write a run marker in `findings.md` ("in progress") so "ran but empty" ≠
   "didn't run".
 - **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
   this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `_run.json` (`status: error`, block type + request id in `errors[]`) and `summary.txt` in the
-  error-handback shape, then hand back. Never retry, reword, split, background, or otherwise bypass the
+  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
+  then hand back. Never retry, reword, split, background, or otherwise bypass the
   block (see CLAUDE.md).
 - Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/ghidra/<timestamp>/` (git-ignored).
+  `git rev-parse --show-toplevel` under `out/<engagement>/ghidra/<timestamp>/` (git-ignored).
