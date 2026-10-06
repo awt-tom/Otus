@@ -71,8 +71,10 @@ maintenance is distinct from executing them.
 
 - **Skills, recon-runner, vuln-hunter:** write records via `scripts/otus-log.py`, never hand-roll JSON
   or write `findings.md` themselves. Raw tool output and tool-native JSON remain unchanged.
-- **Reviewer:** writes only its assigned run's `review.json` via Write, using the schema below.
+- **Reviewer (including the standalone review skill's verdict):** writes only its assigned run's
+  `review.json` via Write, using the schema below; this verdict is the exception to the skill JSON rule.
   Verification has no target contact and requires no Python/general shell permission.
+  The coordinator supplies an actual UTC review timestamp to the locked reviewer agent.
 - **Reporter:** writes its own report `run.json`, `events.jsonl`, and a matching rendered `findings.md`
   via Write, with the same schemas. This is the only direct-writing run-record exception; preserve
   its locked shell. Its compilation notes live in `notes/`, not the raw `run.log`.
