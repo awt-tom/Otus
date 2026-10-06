@@ -1,35 +1,61 @@
-# Otus runtime routing
+<!-- GENERATED from AGENTS.md — do not edit directly.
+     Edit AGENTS.md, then run: python3 -I scripts/build-runtimes.py -->
 
-Otus is a library of offensive-security **skills** (per-tool runbooks under `.claude/skills/`) and a
-small set of **agents** (`.claude/agents/`) that run them in isolated contexts. The agent loads a
-skill's `SKILL.md` on demand, follows it, and files evidence under `out/`.
+# Otus — Agent Contract
 
-## Routing
-- **Recon / enumeration** (subfinder, httpx, port-scanner, ffuf) → `recon-runner`.
-- **Scanning / exploitation / post-exploitation** (nuclei, the web-vuln classes, `exploitation`,
-  `ssh-foothold`, `metasploit`, `linpeas`, `privesc-root`, `netexec`, `bloodhound`, `impacket`,
-  `hashcat`, `hydra`) → `vuln-hunter`.
-- **After every skill run**, hand the run dir to `reviewer` (which reads the `review` skill) before
-  results are treated as final.
-- **At the end of an engagement** (or on request to write/summarize the report) → `reporter`. It
-  reads across `out/`, writes only under `out/<engagement>/report/`, produces markdown plus a
-  branded self-contained HTML (Save-as-PDF from any browser; no renderer), and never contacts targets.
+Otus is a library of offensive-security **skills** (per-tool runbooks under `.claude/skills/`) that
+an LLM agent loads on demand, follows, and files evidence for under `out/`. This file is the single
+source of truth for how every skill and agent must behave, independent of runtime. `CLAUDE.md` and
+`.github/copilot-instructions.md` are **generated** from this file (see `scripts/build-runtimes.py`);
+edit the contract here, never in the generated copies.
 
-A typical chain: `subfinder` → `httpx` → `port-scanner` + `ffuf` → `nuclei` → web-vuln classes →
-`exploitation` / `privesc-root`, with `review` after each stage and `reporter` at the end.
+Every rule below is stated **once**. A skill body references it with a single line —
+`Shared contract: see AGENTS.md` — and never restates it.
 
-## Evidence layout (all skills & agents)
-Everything for one engagement is grouped under its own folder, git-ignored:
+## Authorization & scope gate (hard)
+All work is lab/authorized only — in-scope bug-bounty programs, CTF/HTB labs, or systems you own.
+Confirm the target is in scope **once per engagement**, at the very start, and record that
+confirmation in `out/<engagement>/scope.txt`. Every skill run **inherits** that single confirmation —
+do **not** re-confirm scope per run or per prompt. If scope is unclear, STOP and ask — never scan or
+exploit an unconfirmed target. After that one confirmation, proceed autonomously through the planned
+in-scope steps and the normal chain — report progress, but do **not** pause to ask "should I
+continue?" between benign in-scope steps. Only an actual guardrail refusal, a genuine new scope
+question, or a hard tool failure halts a run.
+
+## Engagement workflow
+An engagement proceeds in stages, each producing evidence the next consumes. Runtimes with an agent
+layer delegate these stages to subagents (see `CLAUDE.md`); runtimes without one run the matching
+skill directly and follow the same chain manually.
+
+1. **Recon / enumeration** — `subfinder` → `httpx` → `port-scanner` → `ffuf`: discover assets, live
+   hosts, open services, and content.
+2. **Scanning** — `nuclei` plus the web-vuln classes (`sqlmap`, `xss`, `ssrf`, `idor`, `burpsuite`):
+   find and triage vulnerabilities (triage is mandatory — never report raw scanner output).
+3. **Access / exploitation** — `exploitation`, `metasploit`, `hydra`, `ssh-foothold`: turn a
+   confirmed vulnerability into a foothold, least-destructive proof first.
+4. **Post-exploitation** — `linpeas`, `privesc-root`, `netexec`, `bloodhound`, `impacket`, `hashcat`:
+   escalate privilege, move laterally, and crack credentials.
+5. **Review** — after **every** stage, verify the run against its `## Checklist` (the `review` skill)
+   before its results are treated as final.
+6. **Report** — at the end of the engagement, compile the reviewed evidence into the deliverable.
+
+CTF reverse-engineering and forensics skills (`ghidra`, `pwntools`, `binwalk`, `steghide`,
+`wireshark`) slot in wherever the challenge requires them.
+
+## Evidence layout
+Everything for one engagement is grouped under its own git-ignored folder:
 
 ```
-out/<engagement>/<skill>/<timestamp>/
-  run.json        # lightweight run record (schema below) — written on EVERY terminal outcome
-  review.md       # reviewer verdict (written by the reviewer)
-  findings.md     # human-readable result summary the reporter reads first
-  run.log         # raw tee of the commands run
-  notes/          # scope.txt (required), dns-workaround.txt, etc.
-  evidence/       # raw tool output, scans, screenshots
-  loot/           # creds, flags, cleanup_verify.txt (secrets only here, never in tracked files)
+out/<engagement>/
+  scope.txt                       # ONE scope/authorization confirmation, inherited by every run
+  <skill>/<timestamp>/
+    run.json        # run record (schema below) — written on EVERY terminal outcome
+    review.md       # reviewer verdict (written by the reviewer)
+    findings.md     # human-readable result summary the reporter reads first
+    run.log         # raw tee of the commands run
+    notes/          # dns-workaround.txt, candidates, etc.
+    evidence/       # raw tool output, scans, screenshots
+    loot/           # creds, flags, cleanup_verify.txt (secrets only here, never in tracked files)
 ```
 
 - `<engagement>` is a short slug the user provides (e.g. `acme-htb`); `<timestamp>` is
@@ -38,7 +64,11 @@ out/<engagement>/<skill>/<timestamp>/
   Each run writes **only** into its own dir — never share a dir a sibling could overwrite.
 - **Never** write under `.claude/skills/`. Bloating the skill folder degrades the agent.
 
-### `run.json` schema (lightweight)
+## Run record (`run.json`)
+Write this lightweight record into the run dir on **every** terminal outcome (success, partial, or
+error) before handback. A run that produced evidence but no parseable `run.json` is a defect — the
+reviewer fails it.
+
 ```json
 {
   "skill": "<skill name>",
@@ -54,21 +84,24 @@ out/<engagement>/<skill>/<timestamp>/
   "errors": []
 }
 ```
-Write `run.json` on **every** terminal outcome (success, partial, or error) before handback. A run
-that produced evidence but no parseable `run.json` is a defect — the reviewer fails it.
 
-## Scope gate (hard)
-All work is lab/authorized only. Confirm the target is in scope **once**, at the start of a run,
-and record it in `notes/scope.txt`. If scope is unclear, STOP and ask — never scan or exploit an
-unconfirmed target. After that single confirmation, proceed autonomously through the planned in-scope
-steps and the normal chain — report progress, but do **not** pause to ask "should I continue?"
-between benign in-scope steps. Only an actual guardrail refusal, a genuine new scope question, or a
-hard tool failure halts a run.
+Capture `started`/`finished` from the **same** clock (`date -u +%Y-%m-%dT%H:%M:%SZ`), with
+`finished >= started`. On a hard failure (tool missing, network blocked, auth rejected, out of scope)
+set `status: error` and push a human-readable line to `errors[]` so the reviewer fails fast instead
+of retrying. The `scope-confirmed` checklist item points at the inherited `out/<engagement>/scope.txt`
+(relative path `../../scope.txt` from a run dir).
+
+### Error-handback `findings.md`
+Any `status: error` run (hard error **or** guardrail block) must leave a `findings.md` with, in order:
+**STATUS** (`STATUS: error — <reason>`); **Completed before stop** (what finished + where);
+**Target state** (`changed`/`unchanged`, with the cleanup field below if changed); **Resolution
+options** (concrete user-driven next steps). A guardrail stop must also state explicitly that the run
+**respected the block** and attempted no retry/reword/split/background/bypass.
 
 ## Platform guardrail handling (hard — never bypass)
 A **platform guardrail** is a refusal from the runtime itself (not a scope error or a missing tool):
-a Claude Code safety-classifier refusal ("could not evaluate this action"), or an Anthropic API
-cyber safeguard (`invalid_request`, or an error tagged `[cyber]`).
+a safety-classifier refusal ("could not evaluate this action"), or an API cyber safeguard
+(`invalid_request`, or an error tagged `[cyber]`).
 
 **This engages only on an *actual* refusal.** Absent one, do not pre-emptively pause or ask the user
 "should I continue?". When a call is refused, immediately: (1) stop all further active steps for that
@@ -94,7 +127,7 @@ a socket open hangs the whole run. Every command MUST be non-blocking:
 - A command that blocks, times out, or needs a prompt is a **tool failure**, not a guardrail: record
   it, set `run.json` `status:"error"`, write `findings.md`, hand back. Do not retry it interactively.
 
-## Target host resolution (all skills)
+## Target host resolution
 - If a vhost does not resolve and sudo is available non-interactively (`sudo -n true` succeeds):
   `echo "<ip> <vhost>" | sudo -n tee -a /etc/hosts`.
 - Otherwise use the tool's own override: `--resolve <host>:<port>:<ip>` (curl/ffuf) or a
@@ -123,3 +156,24 @@ created and whether it was removed or is **STILL OWED**. Never accept an unverif
 `run.json` and `findings.md` must never contradict the on-disk evidence or `notes/*.txt` (e.g. do
 not claim `--resolve` was used when a `Host:` header was used). Describe the method exactly as
 performed. The reviewer treats any run↔evidence contradiction as a failure.
+
+---
+
+## Claude Code runtime — agent routing
+
+Claude Code and OpenCode read `.claude/skills/` natively (flat, one tool-named folder per skill).
+`.claude/agents/` adds four subagents that run those skills in isolated contexts:
+
+- **Recon / enumeration** (subfinder, httpx, port-scanner, ffuf) → `recon-runner`.
+- **Scanning / exploitation / post-exploitation** (nuclei, the web-vuln classes, `exploitation`,
+  `ssh-foothold`, `metasploit`, `linpeas`, `privesc-root`, `netexec`, `bloodhound`, `impacket`,
+  `hashcat`, `hydra`) → `vuln-hunter`.
+- **After every skill run**, hand the run dir to `reviewer` (which reads the `review` skill) before
+  results are treated as final.
+- **At the end of an engagement** (or on request to write/summarize the report) → `reporter`. It
+  reads across `out/`, writes only under `out/<engagement>/report/`, produces markdown plus a
+  branded self-contained HTML, and never contacts targets.
+
+A typical chain: `subfinder` → `httpx` → `port-scanner` + `ffuf` → `nuclei` → web-vuln classes →
+`exploitation` / `privesc-root`, with `review` after each stage and `reporter` at the end. This is
+the Claude Code wiring of the runtime-agnostic "Engagement workflow" section above.

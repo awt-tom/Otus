@@ -1,7 +1,7 @@
 # Otus
 
 Otus is a library of **offensive-security skills** for an LLM agent. Each skill is a
-self-contained runbook (`.claude/skills/<name>/SKILL.md`) that the agent loads on demand to run a
+self-contained runbook (`.claude/skills/<tool>/SKILL.md`) that the agent loads on demand to run a
 specific bug-bounty / CTF / lab task — recon, scanning, a web-vuln class, exploitation,
 password cracking, privesc, or CTF reversing/forensics — with a consistent structure,
 evidence trail, and completion check.
@@ -10,26 +10,30 @@ evidence trail, and completion check.
 
 > ⚠️ **Authorized use only.** These skills drive real offensive tools. Use them only against
 > targets you are explicitly permitted to test: in-scope bug-bounty programs, CTF/HTB labs, or
-> systems you own. Every skill begins with a scope-guard line and aborts if the target isn't
-> confirmed in scope.
+> systems you own. Scope is confirmed **once per engagement** (recorded in `out/<engagement>/scope.txt`)
+> and inherited by every run; work stops if the target isn't confirmed in scope.
 
 ## How a skill works
 
-Each `SKILL.md` follows a fixed template (see `docs/skill-generator-guide.md`):
+Each `SKILL.md` is deliberately slim and tool-specific (see `templates/SKILL.template.md`):
 
-- **YAML frontmatter** — `name` (equals the folder), `description`, `arguments`, and
-  model/effort/context/agent hints.
-- **Scope guard** — first line of the body; authorized targets only.
-- **Body sections, in order** — Goal, Steps, Modern tooling & alternatives, Output formats,
-  RAG / shared data / cross-skill, **Checklist**, Notes / pitfalls.
+- **YAML frontmatter** — `name` (equals the folder), `description`, `arguments`, `model`, `effort`,
+  `context`, `agent`, `category`, and `domain`.
+- **Shared contract** — one line, `Shared contract: see AGENTS.md`, instead of re-stating the
+  scope gate, run-dir layout, guardrail rule, etc. in every body.
+- **Tool-specific body** — Goal, Steps (the real commands), Modern tooling, a `## Checklist` of
+  the tool-unique verifiable items, and tool-specific pitfalls.
 - **Checklist** — a fenced `yaml` block of verifiable items (`verify: exists | nonempty |
-  contains:<regex> | min-lines:<n> | exit-zero | judge`). The scope gate is always
-  `on_fail: fail`. Any step that can legitimately produce nothing still writes a marker file,
-  so "ran but empty" ≠ "didn't run".
-- **Run record** — every run writes its evidence, a `run.log`, a human-readable `findings.md`, and a
-  `run.json` to a timestamped `out/<engagement>/<name>/<timestamp>/` folder anchored at the repo root
-  (`git rev-parse --show-toplevel`). Output is never written under `.claude/skills/`. `out/` is
-  git-ignored.
+  contains:<regex> | min-lines:<n> | exit-zero | judge`). The scope-confirmed item is always
+  `on_fail: fail` and references the inherited `out/<engagement>/scope.txt`. Any step that can
+  legitimately produce nothing still writes a marker file, so "ran but empty" ≠ "didn't run".
+- **Run record** — every run writes its evidence, `run.log`, a human-readable `findings.md`, and a
+  `run.json` into `out/<engagement>/<tool>/<timestamp>/` (anchored at the repo root). Output is never
+  written under `.claude/skills/`. `out/` is git-ignored.
+
+The behavioural rules every skill shares — authorization, evidence layout, the `run.json` schema,
+guardrail handling, non-interactive execution, cleanup verification — live **once** in
+[`AGENTS.md`](AGENTS.md).
 
 ## How to use it
 
@@ -37,79 +41,87 @@ Otus doesn't replace the tools — it drives them. You still need the underlying
 (nmap, subfinder, httpx, ffuf, nuclei, sqlmap, etc.) installed, e.g. on Kali or via each
 tool's install docs.
 
-1. **Point your agent at a skill.** In an agent session (Claude Code, Copilot, or similar)
-   with this repo as context, ask for the capability — for example *"run the `port-scanner`
-   skill against 10.10.10.5"*. The agent loads `.claude/skills/port-scanner/SKILL.md` and follows it.
-2. **Pass arguments.** Each skill's frontmatter declares its `arguments` (e.g.
-   `port-scanner` takes `target [ports]`, `subfinder` takes a domain). Provide the target and
-   any options the skill asks for.
-3. **Confirm scope.** The skill's scope guard requires an authorized target. Only run against
-   in-scope programs, CTF/HTB labs, or systems you own — the skill aborts otherwise.
+1. **Point your agent at a skill.** In an agent session with this repo as context, ask for the
+   capability — e.g. *"run the `port-scanner` skill against 10.10.10.5"*. The agent loads
+   `.claude/skills/port-scanner/SKILL.md` and follows it.
+2. **Confirm scope once.** At the start of an engagement, confirm the target is authorized and
+   record it in `out/<engagement>/scope.txt`. Every skill inherits that single confirmation.
+3. **Pass arguments.** Each skill's frontmatter declares its `arguments` (e.g. `port-scanner` takes
+   `target [ports]`, `subfinder` takes a domain).
 4. **Collect evidence.** Results, a `run.log`, a `findings.md`, and a `run.json` land in
-   `out/<engagement>/<name>/<timestamp>/` at the repo root (git-ignored). Nothing is written under `.claude/skills/`.
+   `out/<engagement>/<tool>/<timestamp>/` (git-ignored).
 5. **Verify the run.** Hand the run directory to the `reviewer` (skill or subagent) to check it
    against the skill's `## Checklist` and return a PASS / FAILED verdict.
 
-**Typical chain:** `subfinder` (subdomains) → `httpx` (live hosts) → `port-scanner` + `ffuf`
-(ports & content) → `nuclei` (scan) → web-vuln class skills (`sqlmap`, `xss`, `ssrf`, `idor`) →
-`exploitation` → `privesc-root` (AD / password skills as needed), with `review` after each stage
-and the `reporter` compiling the final report at the end.
+## Runtimes
 
-With the [Claude Code agent layer](#claude-code-agent-layer), delegate recon to `recon-runner`,
-scanning/exploitation to `vuln-hunter`, verification to `reviewer`, and the final report to
-`reporter`; `CLAUDE.md` routes tasks automatically.
+Otus is portable across agent runtimes. [`AGENTS.md`](AGENTS.md) is the single, runtime-agnostic
+contract; the runtime-specific instruction files are **generated** from it.
+
+- **Claude Code & OpenCode** read `.claude/skills/` natively — skills are flat, one tool-named
+  folder per skill (`.claude/skills/<tool>/SKILL.md`). Claude Code also uses the subagents in
+  `.claude/agents/` and the routing appendix in `CLAUDE.md`.
+- **GitHub Copilot** — point its config `skillDirectories` at `./.claude/skills` so it can load the
+  skills (verify the exact key name in your setup). `.github/copilot-instructions.md` is
+  auto-included per session.
+- **Regenerate the adapters** after editing the contract:
+  ```bash
+  python3 -I scripts/build-runtimes.py   # regenerates CLAUDE.md + .github/copilot-instructions.md
+  ```
+  Edit `AGENTS.md`, never the generated `CLAUDE.md` / `.github/copilot-instructions.md`.
 
 ## Skill catalog
 
+The full, generated browse-index — every skill by **function** and by **domain** — is
+[`docs/catalog.md`](docs/catalog.md) (regenerate with `python3 -I scripts/build-catalog.py`).
+
 | Category | Skills |
 |---|---|
-| **Recon & enumeration** | `subfinder` (passive subdomains) · `httpx` (HTTP probe/fingerprint) · `port-scanner` (nmap port/service scan) · `ffuf` (content/endpoint fuzzing) |
-| **Vulnerability scanning** | `nuclei` (template-based scanner) |
-| **Web-vuln classes** | `sqlmap` (SQLi) · `xss` · `ssrf` · `idor` (IDOR/BOLA) · `burpsuite` (manual web-testing methodology) |
-| **Exploitation** | `metasploit` (framework) · `exploitation` (manual/scripted non-msfconsole PoCs) · `ssh-foothold` (validate a supplied SSH credential, land an initial foothold) · `pwntools` (exploit dev) |
-| **Active Directory / network** | `netexec` (AD swiss-army knife) · `bloodhound` (attack-path analysis) · `impacket` (protocol tools) |
-| **Passwords & credentials** | `hashcat` (GPU hash cracking) · `hydra` (online login brute-force) |
-| **Privilege escalation** | `linpeas` / winpeas (privesc enumeration) · `privesc-root` (escalate a foothold to root, prove uid=0, capture the flag) |
-| **CTF: reversing & forensics** | `ghidra` (decompiler) · `wireshark` / tshark (packet analysis) · `binwalk` (firmware/file carving) · `steghide` (steganography) |
-| **Meta** | `review` (independent completion check & remediation) |
+| **Recon** | `subfinder` · `httpx` · `port-scanner` · `ffuf` |
+| **Web** | `nuclei` · `sqlmap` · `xss` · `ssrf` · `idor` · `burpsuite` |
+| **Access** | `exploitation` · `metasploit` · `hydra` · `ssh-foothold` |
+| **AD / network** | `netexec` · `bloodhound` · `impacket` |
+| **Privesc / creds** | `linpeas` · `privesc-root` · `hashcat` |
+| **RE / forensics** | `ghidra` · `pwntools` · `binwalk` · `steghide` · `wireshark` |
+| **Meta** | `review` |
 
 ## Claude Code agent layer
 
-`CLAUDE.md` (repo root) defines runtime routing, and `.claude/agents/` holds four subagents
+`CLAUDE.md` (generated) defines runtime routing, and `.claude/agents/` holds four subagents
 that run skills in isolated contexts:
 
 - **`recon-runner`** — runs read-heavy recon/enumeration (subfinder, httpx, port-scanner, ffuf)
   and returns a concise summary instead of raw dumps.
 - **`vuln-hunter`** — runs the scan → triage → (lab-only) exploit loop for nuclei and the
   web-vuln / exploitation skills.
-- **`reviewer`** — read-only, independently verifies a run against its `## Checklist` on disk and
-  returns a verdict (PASS / FAILED-RECOVERED / FAILED / NON-COMPLIANT). It never runs
-  target-facing tools.
-- **`reporter`** — read-only over `out/`; compiles the reviewed evidence into the final
-  engagement report — canonical markdown plus a branded, self-contained HTML (print-ready,
-  Save-as-PDF from any browser; no rendering dependency). Writes only under `out/<engagement>/report/` and
-  never contacts targets.
-
-Recon-oriented and scanning/exploitation skills carry a routing line pointing at the matching
-subagent, every run is handed to the `reviewer` before results are treated as final, and at the
-end of an engagement the `reporter` turns the reviewed runs into the deliverable report.
+- **`reviewer`** — read-only; independently verifies a run against its `## Checklist` on disk and
+  returns a verdict (PASS / FAILED-RECOVERED / FAILED / NON-COMPLIANT).
+- **`reporter`** — read-only over `out/`; compiles the reviewed evidence into the final engagement
+  report (canonical markdown plus a branded, self-contained HTML, print-ready via Save-as-PDF).
+  Writes only under `out/<engagement>/report/`.
 
 ## Repository layout
 
 ```
-.claude/skills/<name>/SKILL.md   # one capability per folder; the runbook the agent loads
-.claude/agents/          # recon-runner, vuln-hunter, reviewer, reporter subagents
-CLAUDE.md                # runtime routing rules + hard safety invariants
-docs/                    # authoring + verification specs
-out/                     # timestamped run evidence, grouped by engagement (git-ignored)
+AGENTS.md                        # the canonical, runtime-agnostic agent contract (edit this)
+CLAUDE.md                        # GENERATED from AGENTS.md + Claude Code routing appendix
+.github/copilot-instructions.md  # GENERATED from AGENTS.md + a Copilot note
+.claude/skills/<tool>/SKILL.md   # one capability per tool-named folder; the runbook the agent loads
+.claude/agents/                  # recon-runner, vuln-hunter, reviewer, reporter subagents
+docs/authoring.md                # skill-authoring + verification spec, tool catalog, conventions
+docs/catalog.md                  # GENERATED human browse-index (by function + by domain)
+templates/                       # SKILL.template.md, report.css
+scripts/                         # build-runtimes.py, build-catalog.py
+out/                             # timestamped run evidence, grouped by engagement (git-ignored)
 ```
 
 ## Docs
 
-- `docs/skill-generator-guide.md` — skill format, metadata schema, body template,
-  model/effort/context guidance, tool catalog, repo layout, and build order.
-- `docs/skill-review-guide.md` — the `## Checklist` spec, the `run.json` run record,
-  and the Reviewer skill.
+- [`AGENTS.md`](AGENTS.md) — the shared agent contract (authorization, evidence layout, `run.json`,
+  guardrail handling, non-interactive execution, cleanup, self-report).
+- [`docs/authoring.md`](docs/authoring.md) — skill format, metadata schema, the `## Checklist`
+  verification spec, the tool catalog, the model/effort convention, and the build order.
+- [`docs/catalog.md`](docs/catalog.md) — the generated browse-index of every skill.
 
 ## Maintainer
 
