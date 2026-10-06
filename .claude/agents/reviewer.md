@@ -47,7 +47,7 @@ Procedure:
      evidence-backed (cites an `out/` path and maps to a PASS / FAILED-RECOVERED run), secrets are
      redacted in **both** the markdown and HTML outputs, no FAILED / NON-COMPLIANT run is presented
      as confirmed, and `engagement-report.html` exists → FAILED on any violation.
-4. Decide, per the `review` skill (`.claude/skills/review/SKILL.md`) and docs/skill-review-guide.md §4:
+4. Decide, per the `review` skill (`.claude/skills/review/SKILL.md`) and docs/authoring.md §9:
    - all required items pass → PASS
    - a failed item has on_fail: fail (scope gate) → FAILED (never retry)
    - isolated recoverable failures → report REDO-PART with the exact steps to re-run
