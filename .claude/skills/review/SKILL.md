@@ -11,97 +11,48 @@ model: inherit
 effort: high
 context: fork
 agent: general-purpose
+category: meta
+domain: misc
 ---
 
 # review — independent completion check & remediation
 
-**Scope guard:** Verification is read-only. Re-running a skill inherits that skill's own
-scope guard; never re-run anything whose target is not confirmed in scope.
+Shared contract: see AGENTS.md. Verification is **read-only**; a redo inherits the target skill's scope (never re-run an out-of-scope target).
 
 ## Goal
-Decide, from evidence alone, whether `<skill_name>`'s run in `<run_dir>` completed every
-required checklist item. If not, drive the right fix (redo part / redo skill) or stop and
-tell the user — without ever looping indefinitely or repeating a destructive action.
+Decide, from evidence alone, whether `<skill_name>`'s run in `<run_dir>` completed every required
+checklist item — then drive the right fix (redo part / redo skill) or stop and tell the user, without looping forever or repeating a destructive action.
 
 ## Inputs
-- `skill_name` — the skill that was run (e.g. `port-scanner`, `nuclei`).
-- `run_dir` — the timestamped run directory where its evidence lives
-  (e.g. `out/acme-htb/port-scanner/20261001T230500Z`). Checklist `evidence` paths resolve relative to it.
+- `skill_name` — skill that ran (e.g. `nuclei`); `run_dir` — its timestamped run dir (checklist `evidence` paths resolve relative to it).
 - `max_part_retries` (default 2), `max_skill_retries` (default 1).
 
 ## Steps
-1. **Load the contract.** `Read` the task skill's `SKILL.md` (`.claude/skills/<skill_name>/SKILL.md`)
-   and parse its `## Checklist` YAML. If it has **no checklist**, stop: status = NON-COMPLIANT
-   (cannot be verified). Report to the user and do not pass it.
-2. **Load context.** Read `<run_dir>/run.json`. **A parseable `run.json` is mandatory on any
-   terminal run** — if evidence exists but `run.json` is missing or unparseable, go to FAIL
-   (run-record invariant). If `status: error`:
-   - **platform guardrail** (`errors[]` block type `guardrail:permission-classifier` /
-     `guardrail:api-cyber-safeguard`): verify the run **respected the block** — stopped cleanly, wrote
-     `findings.md` in the error-handback shape, and did NOT retry / reword / split / background /
-     bypass. PASS only if respected; a bypass attempt → FAIL.
-   - **other hard error** (tool-not-found, network-blocked, auth-failed, out-of-scope): skip retries
-     and go to FAIL with that reason.
-3. **Verify every item independently** using its `verify` method against `evidence`, resolving
-   each path relative to `<run_dir>` (`exists` / `nonempty` / `contains:<regex>` / `min-lines:<n>`
-   / `exit-zero` via read-only checks; `judge` by reading the evidence and assessing against
-   `desc`). Record pass/fail per item with the reason. **Do not trust `run.json` item `ok`** — re-check.
-3b. **Check cross-cutting invariants** (read-only, independent of the checklist):
-   - **Timestamp sanity:** `started`/`finished` parse as ISO-8601 UTC and `finished >= started`.
-   - **Self-report consistency:** `run.json`/`findings.md` narrative does not contradict the
-     evidence or `notes/*.txt`.
-   - **Cross-run contamination:** every `evidence` file belongs to THIS `<run_dir>`, not a sibling
-     concurrent run.
-   - **Cleanup state:** a run that changed target state has `loot/cleanup_verify.txt` with positive
-     absence evidence; an aborted mid-change run states the owed cleanup in `findings.md`.
-   Any invariant violation → FAIL.
-4. **Decide** (see Decision logic).
-5. **Remediate** per the verdict, then **re-verify** the affected items (back to step 3)
-   until PASS or a retry budget is exhausted.
-6. **Write the report** to `<run_dir>/review.md` (table of items → pass/fail/reason, a
-   cross-cutting-invariants section, final verdict + what was redone). On FAIL, also surface a
-   plain-language message to the user.
+1. **Load the contract.** Read `.claude/skills/<skill_name>/SKILL.md` and parse its `## Checklist` YAML. No checklist → stop: NON-COMPLIANT (unverifiable); report to the user.
+2. **Load context.** Read `<run_dir>/run.json` — **mandatory on any terminal run**; missing/unparseable while evidence exists → FAIL. If `status: error`: a **platform-guardrail** block (per AGENTS.md) PASSes only if the run *respected* it (stopped, wrote `findings.md` handback, no retry/reword/split/bypass) — a bypass attempt → FAIL; any **other hard error** (tool-missing, network, auth, out-of-scope) → FAIL, no retries.
+3. **Verify every item independently** against its `evidence` (path relative to `<run_dir>`) using its `verify` method (`exists`/`nonempty`/`contains:<regex>`/`min-lines:<n>`/`exit-zero`; `judge` by reading + assessing vs `desc`). **Do not trust `run.json` item `ok` — re-check.** Record pass/fail + reason per item.
+4. **Check cross-cutting invariants** (read-only): timestamps parse ISO-8601 UTC with `finished >= started`; `run.json`/`findings.md` don't contradict evidence or `notes/*.txt`; every `evidence` file belongs to THIS run (no sibling contamination); a state-changing run has `loot/cleanup_verify.txt` with positive absence evidence (or states owed cleanup). Any violation → FAIL.
+5. **Decide** (below), **remediate**, then **re-verify** affected items until PASS or budget exhausted. **Report** to `<run_dir>/review.md` (per-item table + invariants + verdict + what was redone); on FAIL, also surface a plain-language user message.
 
 ## Decision logic
-Let `F` = required items that failed verification.
+Let `F` = required items that failed.
+- Missing/unparseable `run.json`, a bypassed guardrail, or any invariant violation → **FAIL** (not retryable).
+- `F` empty and invariants hold → **PASS.**
+- Any `F` item is `on_fail: fail` (e.g. scope gate) → **FAIL immediately**, no retry.
+- `run.json.status == error` (hard error / respected guardrail) → **FAIL**, not retryable here.
+- All `F` are isolated evidence-producing steps and `part_retries < max_part_retries` → **REDO-PART** (re-run only those steps), `part_retries++`, re-verify.
+- Else if `skill_retries < max_skill_retries` → **REDO-SKILL** (re-run the whole skill fresh), `skill_retries++`, re-verify.
+- Else → **FAIL** (retries exhausted).
 
-- Missing/unparseable `run.json` on a terminal run → **FAIL.** (run-record invariant; not retryable)
-- Platform-guardrail error where the run tried to bypass the block → **FAIL.** Not retryable.
-- Any cross-cutting invariant violation (timestamp, self-report, cross-run, cleanup) → **FAIL.**
-- `F` empty (and invariants hold) → **PASS.** Write report, done.
-- Any item in `F` has `on_fail: fail` (e.g. scope gate) → **FAIL immediately.** Do not retry.
-- Else if `run.json.status == error` (hard error, or a respected guardrail block) → **FAIL.** Not
-  retryable here.
-- Else if all of `F` are isolated, evidence-producing steps and `part_retries < max_part_retries`
-  → **REDO-PART:** re-run only the steps that produce those evidences (by following the
-  matching numbered steps in the task skill), `part_retries++`, re-verify.
-- Else if `skill_retries < max_skill_retries` → **REDO-SKILL:** re-run the whole task skill
-  from the top (fresh), `skill_retries++`, re-verify.
-- Else → **FAIL.** Retries exhausted.
-
-## Remediation rules (guardrails)
-- **Never retry an `on_fail: fail` item.** Scope/ambiguity/destructive = stop.
-- **Never repeat a destructive or irreversible action** on retry (exploit firing, data
-  modification, account-lockout-risk spraying). If the only fix is such an action, FAIL and
-  ask the user. Only an **operational** failure (no target action occurred — provider hiccup,
-  transport/setup error, or a timeout before any contact) is safely re-runnable here; an
-  **actionful** failure (a command that plausibly executed or had side effects) is never replayed.
-- **Bounded:** at most `max_part_retries` part-redos and `max_skill_retries` full-redos.
-- A redo must target the **specific failed items**; don't re-run clean steps needlessly.
+## Remediation guardrails
+- **Never retry an `on_fail: fail` item** (scope/ambiguity/destructive = stop).
+- **Never repeat a destructive/irreversible action** (exploit firing, data mod, lockout-risk spraying) on retry — if that's the only fix, FAIL and ask. Only an **operational** failure (no target action occurred) is safely re-runnable; an **actionful** failure is never replayed.
+- Bounded by the retry budgets; a redo targets the **specific failed items**, not clean steps.
 
 ## Output formats
-- `<run_dir>/review.md` — human-readable verdict + per-item table + actions taken.
-- Verdict token for programmatic use: `PASS | FAILED-RECOVERED | FAILED | NON-COMPLIANT`.
-- On FAIL: a direct user message stating which parts failed, what was tried, the likely
-  cause, and the decision needed from the user.
-
-## RAG / cross-skill
-- Reads the target skill's own `## Checklist` (the contract) and re-invokes that skill for
-  redos. No external RAG required; it's a meta-skill over whatever skill it's pointed at.
+`<run_dir>/review.md` (verdict + per-item table + actions) and a verdict token: `PASS | FAILED-RECOVERED | FAILED | NON-COMPLIANT`.
 
 ## Notes / pitfalls
-- Prefer forking into a fresh agent (`context: fork`) so the reviewer hasn't "seen" the work
-  and grades the artifacts cold.
-- If evidence exists but is empty/garbage, that's a FAIL for that item — `nonempty` / `contains:`
-  catch this; don't let bare `exists` wave it through.
-- Report *why* each item failed (missing file vs empty vs pattern-miss), not just that it did.
+- Fork a **fresh** agent (`context: fork`) so the reviewer grades artifacts cold.
+- Evidence that exists but is empty/garbage is a **FAIL** for that item — `nonempty`/`contains:` catch what bare `exists` waves through.
+- Report *why* each item failed (missing vs empty vs pattern-miss), not just that it did.

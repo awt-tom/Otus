@@ -7,7 +7,8 @@ description: >
   engagement report". Reads across the repo; writes only under out/<engagement>/report/; never
   contacts a target or runs offensive tools.
 arguments: "[engagement_name]"
-model: sonnet
+model: inherit
+effort: medium
 tools: Read, Grep, Glob, Write, Bash(base64 *), Bash(cat *), Bash(wc *), Bash(mkdir *), Bash(git rev-parse *), Bash(date *)
 ---
 

@@ -8,106 +8,44 @@ description: >
   brute (use hydra).
 arguments: "hashes_file [mode] [wordlist]"
 model: inherit
-effort: high
+effort: medium
 context: inline
 agent:
+category: privesc-creds
+domain: crypto
 ---
 
 # hashcat — GPU password/hash cracking
 
-**Scope guard:** Authorized work only (in-scope program / lab / owned). Only crack hashes you are authorized to possess and use; cracked credentials are used only against in-scope systems. Abort if the hashes or their use are not in scope.
+Shared contract: see AGENTS.md.
 
-## Goal (desired outcome)
-Recover plaintext from captured hashes — identifying the hash type, cracking with an escalating
-wordlist → rules → mask strategy, and listing what cracked — to enable authenticated access or
-lateral movement, with cracked creds recorded for the report.
+## Goal
+Recover plaintext from captured hashes — identify the hash type, crack with an escalating
+wordlist → rules → mask strategy, and list what cracked — to enable authenticated access or lateral movement.
 
 ## Steps
-1. **Precondition / scope / identify.** Confirm the hashes are in scope. Identify the hash type with
-   `hashid` / `name-that-hash` and map it to a hashcat `-m <mode>`. Anchor a timestamped run
-   directory to the repo root (never write under `skills/`); fail fast on an empty hash file:
-   ```bash
-   ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_hashcat="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/hashcat/$(date -u +%Y%m%dT%H%M%SZ)}"
-   RUN="$OTUS_RUN_hashcat"
-   mkdir -p "$RUN/notes"
-   HASHES="${1:?path to hashes file required}"; MODE="${2:?hashcat -m mode required}"; WL="${3:-/usr/share/wordlists/rockyou.txt}"
-   [ -s "$HASHES" ] || { echo "hash file empty/missing: $HASHES" | tee -a "$RUN/run.log"; exit 1; }
-   echo "hashes confirmed in scope; mode=$MODE: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
-   : > "$RUN/run.log"
-   ```
-2. **Wordlist attack** (straight) — fastest first pass:
-   ```bash
-   hashcat -m "$MODE" "$HASHES" "$WL" --outfile "$RUN/cracked.txt" 2>&1 | tee -a "$RUN/run.log"
-   ```
-3. **Escalate deliberately** (don't brute blindly) — climb the strategy ladder:
-   ```bash
-   hashcat -m "$MODE" "$HASHES" "$WL" -r /usr/share/hashcat/rules/best64.rule --outfile "$RUN/cracked.txt" 2>&1 | tee -a "$RUN/run.log"
-   hashcat -m "$MODE" "$HASHES" -a 3 '?u?l?l?l?l?d' --outfile "$RUN/cracked.txt" 2>&1 | tee -a "$RUN/run.log"   # mask
-   ```
-4. **List cracked + marker.** `--show` lists everything cracked (from the potfile); always write a
-   run marker so "ran but nothing" ≠ "didn't run":
-   ```bash
-   hashcat -m "$MODE" "$HASHES" --show > "$RUN/show.txt" 2>>"$RUN/run.log" || true
-   if [ -s "$RUN/cracked.txt" ] || [ -s "$RUN/show.txt" ]; then
-    echo "hashcat: $(wc -l < "$RUN/cracked.txt" 2>/dev/null || echo 0) cracked (see cracked.txt / show.txt)" > "$RUN/findings.md"
-   else
-    echo "no hashes cracked" > "$RUN/findings.md"
-   fi
-   ```
-  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed cracked creds
-   to `netexec` / login skills.
+1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Identify the hash type with `hashid`/`name-that-hash` → a hashcat `-m <mode>` (record it in `notes/mode.txt`); fail fast on an empty hash file. Default `WL=/usr/share/wordlists/rockyou.txt`.
+2. **Wordlist attack** (fastest first pass): `hashcat -m "$MODE" "$HASHES" "$WL" --outfile "$RUN/cracked.txt" 2>&1 | tee -a "$RUN/run.log"`.
+3. **Escalate deliberately** (don't brute blindly): add rules `-r /usr/share/hashcat/rules/best64.rule`, then a mask `-a 3 '?u?l?l?l?l?d'` — same `-m`/`--outfile`.
+4. **List cracked + marker + run record.** `hashcat -m "$MODE" "$HASHES" --show > "$RUN/show.txt"` lists everything cracked (from the potfile). Write a run marker (`no hashes cracked` if none), then `run.json`. Feed cracked creds to `netexec`/login skills.
 
 ## Modern tooling & alternatives
-`hashcat` (GPU) is primary; `john` (Jumbo) for format coverage / CPU and `*2john` converters that
-bridge many formats (zip2john, ssh2john, …). `hashid` / `name-that-hash` for identification. Keep a
-wordlist + rules strategy ladder rather than brute-forcing blindly.
-
-## Output formats
-Potfile at `~/.hashcat/hashcat.potfile` (global cracked store); `--outfile` writes cracked
-hash:plain to `$RUN/cracked.txt`; `--show` lists cracked to `$RUN/show.txt`. This skill also writes
-`$RUN/findings.md` (run marker), `$RUN/run.log`, and a run record `$RUN/run.json`:
-```json
-{
-  "skill": "hashcat",
-  "engagement": "<engagement slug>",
-  "target": "<hashes_file>",
-  "run_dir": "out/<engagement>/hashcat/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
-  "status": "complete",
-  "summary": "<one line>",
-  "evidence": ["findings.md", "cracked.txt", "show.txt"],
-  "items": {
-    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
-    "mode-identified":  { "ok": true, "evidence": "notes/scope.txt" },
-    "crack-attempted":  { "ok": true, "evidence": "findings.md" },
-    "cracked-recorded": { "ok": true, "evidence": "cracked.txt" }
-  },
-  "errors": []
-}
-```
-`status` ∈ `complete | partial | error`. On a hard failure (hashcat missing, bad mode, empty input,
-out of scope) set `status: error` and push a human-readable line to `errors[]`.
-
-## RAG / shared data / cross-skill
-**High RAG value:** a hash-mode lookup table (`-m` per hash type) + rules/mask cheat-sheet. Consumes
-hashes from `impacket` (`secretsdump`, Kerberoast/AS-REP), `responder`, and web dumps; cracked creds
-feed `netexec` and login skills. Shares the wordlist pool (rockyou/SecLists) — see §7.
+`hashcat` (GPU) is primary; `john` (Jumbo) for format coverage / CPU and `*2john` converters (zip2john,
+ssh2john, …) bridge formats. `hashid`/`name-that-hash` for identification. Keep a wordlist + rules ladder rather than brute-forcing blindly.
 
 ## Checklist
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Hashes (and use of recovered creds) confirmed in scope before cracking
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); hashes and use of recovered creds in scope
     verify: judge
-    evidence: notes/scope.txt
+    evidence: ../../scope.txt
     on_fail: fail
     required: true
   - id: mode-identified
     desc: Hash type identified and mapped to a hashcat -m mode
     verify: nonempty
-    evidence: notes/scope.txt
+    evidence: notes/mode.txt
     on_fail: redo-part
     required: true
   - id: crack-attempted
@@ -125,17 +63,6 @@ checklist:
 ```
 
 ## Notes / pitfalls
-- **Don't brute blindly** — climb the ladder (wordlist → rules → masks → combinator); most cracks
-  come from `rockyou` + `best64.rule`.
-- Pick `-m <mode>` from the hash type first; a wrong mode wastes the whole run.
-- The potfile caches results — `--show` re-lists cracked hashes instantly without re-cracking.
-- `*2john` / jumbo converters bridge archive/doc formats into crackable hashes.
-- A run that cracks nothing must still write `findings.md` ("no hashes cracked") so "ran but empty"
-  ≠ "didn't run".
-- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
-  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
-  then hand back. Never retry, reword, split, background, or otherwise bypass the
-  block (see CLAUDE.md).
-- Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/<engagement>/hashcat/<timestamp>/` (git-ignored).
+- **Don't brute blindly** — climb the ladder (wordlist → rules → masks → combinator); most cracks come from `rockyou` + `best64.rule`.
+- Pick `-m <mode>` from the hash type first; a wrong mode wastes the whole run. The potfile caches results — `--show` re-lists cracked hashes instantly without re-cracking.
+- `*2john`/jumbo converters bridge archive/doc formats into crackable hashes. A run that cracks nothing still writes `findings.md` ("no hashes cracked").

@@ -8,102 +8,39 @@ description: >
   (metasploit). Account-lockout risk — check policy before spraying.
 arguments: "targets [-u user] [-p pass] [protocol]"
 model: inherit
-effort: high
+effort: medium
 context: inline
 agent:
+category: ad-network
+domain: ad
 ---
 
 # netexec — network/AD swiss-army knife (nxc)
 
-**Scope guard:** Authorized targets only (in-scope program / lab / owned). Confirm the target hosts/domain are in scope **and check the account-lockout policy before any credential spray** — a spray that locks out accounts is destructive. Abort if the targets are not confirmed in scope.
+Shared contract: see AGENTS.md.
 
-## Goal (desired outcome)
-Authenticate and enumerate/act across SMB/WinRM/LDAP/MSSQL/RDP — spray credentials safely,
-enumerate shares/users/RIDs, run AD modules (LAPS, GPP, kerberoast), and confirm access — feeding
-loot (creds/hashes) to `impacket` and BloodHound, with the full transcript captured.
+## Goal
+Authenticate and enumerate across SMB/WinRM/LDAP/MSSQL/RDP — spray credentials safely, enumerate
+shares/users/RIDs, run AD modules (LAPS, GPP, kerberoast), confirm access, feeding `impacket`/BloodHound.
 
 ## Steps
-1. **Precondition / scope / lockout check.** Confirm targets are in scope and **read the lockout
-   policy first** (threshold/observation window) so spraying can't lock accounts. Anchor a
-   timestamped run directory to the repo root (never write under `skills/`):
-   ```bash
-   ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_netexec="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/netexec/$(date -u +%Y%m%dT%H%M%SZ)}"
-   RUN="$OTUS_RUN_netexec"
-   mkdir -p "$RUN/notes"
-   TARGETS="${1:?targets (host/CIDR/file) required}"
-   echo "targets $TARGETS confirmed in scope; lockout policy checked: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
-   : > "$RUN/run.log"; : > "$RUN/notes/loot.md"
-   ```
-2. **Authenticate (null/guest first).** Start unauthenticated, logging to the run dir:
-   ```bash
-   nxc smb "$TARGETS" -u '' -p '' --log "$RUN/run.log"        # null session
-   nxc smb "$TARGETS" -u guest -p '' --log "$RUN/run.log"     # guest
-   # then, with creds: nxc smb "$TARGETS" -u <user> -p <pass> --log "$RUN/run.log"
-   ```
-3. **Enumerate.** `--shares --users --rid-brute` to map access and pull users/RIDs. Record anything
-   useful (readable shares, usernames, hashes) in `notes/loot.md`.
-4. **Protocol pivots + modules.** Repeat across protocols (`nxc ldap`, `nxc winrm`, `nxc mssql`) and
-   run modules with `-M <name>` (e.g. `gpp_password`, `laps`, `kerberoast`). Throttle sprays; use
-   `--continue-on-success` only deliberately. Note confirmed access/creds in `notes/loot.md`.
-5. **Loot + marker + hand-off.** Copy the nxc loot DB into the run dir, then write a run marker so
-   "ran but nothing" ≠ "didn't run":
-   ```bash
-   cp -a "$HOME/.nxc/." "$RUN/nxc-db/" 2>/dev/null || true
-   if grep -qiE '\(Pwn3d!\)|\[\+\]' "$RUN/run.log"; then
-    echo "netexec: valid access/creds found (see run.log + notes/loot.md)" > "$RUN/findings.md"
-   else
-    echo "no valid access confirmed" > "$RUN/findings.md"; echo "none" >> "$RUN/notes/loot.md"
-   fi
-   ```
-  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed creds/hashes
-   to `impacket` / BloodHound.
+1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. **Read the lockout policy first** (threshold/observation window) so spraying can't lock accounts.
+2. **Authenticate (null/guest first):** `nxc smb "$TARGETS" -u '' -p '' --log "$RUN/run.log"`, then `-u guest -p ''`, then with creds `-u <user> -p <pass>`. Log everything to the run dir.
+3. **Enumerate.** `--shares --users --rid-brute` to map access and pull users/RIDs. Record readable shares, usernames, hashes in `notes/loot.md`.
+4. **Protocol pivots + modules.** Repeat across `nxc ldap|winrm|mssql` and run `-M <name>` (`gpp_password`, `laps`, `kerberoast`). Throttle sprays; use `--continue-on-success` only deliberately.
+5. **Loot + marker + hand-off.** Copy the nxc loot DB (`cp -a "$HOME/.nxc/." "$RUN/nxc-db/"`), write a run marker (`no valid access confirmed` if none), then write `run.json`. Feed creds/hashes to `impacket`/BloodHound.
 
 ## Modern tooling & alternatives
-`netexec` (`nxc`) is the maintained fork — use it over the retired `crackmapexec`. It also collects
-for BloodHound (`nxc --bloodhound`). Pairs with `impacket` for protocol-level actions and `hashcat`
-for cracking recovered hashes.
-
-## Output formats
-Colorized CLI; persistent loot DB under `~/.nxc/` (copied into `$RUN/nxc-db/`); `--log` mirrors
-output to `$RUN/run.log`. This skill also writes `$RUN/notes/loot.md` (creds/shares/hashes),
-`$RUN/findings.md` (run marker), and a run record `$RUN/run.json`:
-```json
-{
-  "skill": "netexec",
-  "engagement": "<engagement slug>",
-  "target": "<targets>",
-  "run_dir": "out/<engagement>/netexec/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
-  "status": "complete",
-  "summary": "<one line>",
-  "evidence": ["findings.md"],
-  "items": {
-    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
-    "auth-enumerated":  { "ok": true, "evidence": "run.log" },
-    "results-recorded": { "ok": true, "evidence": "findings.md" },
-    "lockout-safe":     { "ok": true, "evidence": "notes/scope.txt" }
-  },
-  "errors": []
-}
-```
-`status` ∈ `complete | partial | error`. On a hard failure (nxc missing, targets unreachable, out of
-scope) set `status: error` and push a human-readable line to `errors[]`.
-
-## RAG / shared data / cross-skill
-Feeds and is fed by BloodHound + `impacket`; the recovered-credential store is **shared across the
-AD skills**. **Very high RAG value:** a WADCOMS / AD-attack map ("I have X → do Y") and module
-cheat-sheet. Hashes recovered here feed `hashcat`; cracked creds loop back into `netexec` as a new
-identity.
+`netexec` (`nxc`) is the maintained fork — use it over the retired `crackmapexec`. It also collects for
+BloodHound (`nxc --bloodhound`); pairs with `impacket` and `hashcat` for cracking recovered hashes.
 
 ## Checklist
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Targets confirmed in scope AND lockout policy checked before any spray
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); lockout policy checked before any spray
     verify: judge
-    evidence: notes/scope.txt
+    evidence: ../../scope.txt
     on_fail: fail
     required: true
   - id: auth-enumerated
@@ -121,23 +58,12 @@ checklist:
   - id: lockout-safe
     desc: Spraying throttled; --continue-on-success only deliberate; no account lockouts caused
     verify: judge
-    evidence: notes/scope.txt
+    evidence: ../../scope.txt
     on_fail: fail
     required: true
 ```
 
 ## Notes / pitfalls
-- **Account-lockout risk on spraying** — check the policy, throttle, and use
-  `--continue-on-success` only deliberately; `lockout-safe` fails hard (`on_fail: fail`).
-- Always try **null / guest** before using credentials.
-- Use `netexec`, not the retired `crackmapexec`.
-- Loot persists in `~/.nxc/` across runs — copy it into the run dir for self-contained evidence.
-- A run that confirms nothing must still write `findings.md` ("no valid access confirmed") and
-  `notes/loot.md` so "ran but empty" ≠ "didn't run".
-- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
-  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
-  then hand back. Never retry, reword, split, background, or otherwise bypass the
-  block (see CLAUDE.md).
-- Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/<engagement>/netexec/<timestamp>/` (git-ignored).
+- **Account-lockout risk on spraying** — check the policy, throttle, use `--continue-on-success` only deliberately; `lockout-safe` fails hard (`on_fail: fail`).
+- Always try **null / guest** before using credentials; use `netexec`, not the retired `crackmapexec`.
+- Loot persists in `~/.nxc/` — copy it into the run dir. A run that confirms nothing still writes `findings.md` + `notes/loot.md`.

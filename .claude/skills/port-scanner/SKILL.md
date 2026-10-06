@@ -7,117 +7,39 @@ description: >
   (use subfinder) or HTTP fingerprinting (use httpx).
 arguments: "target [ports]"
 model: inherit
-effort: medium
+effort: low
 context: inline
 agent:
+category: recon
+domain: network
 ---
 
 # nmap — port & service scanning
 
-**Scope guard:** Authorized targets only (in-scope program / lab / owned). Abort if target not confirmed in scope.
+Shared contract: see AGENTS.md.
 
-## Goal (desired outcome)
-Enumerate open ports, services, and versions on a host and hand a clean, machine-readable
-service inventory to downstream per-service skills. This is the backbone of every HTB box
-and network-scope recon pass.
+## Goal
+Enumerate open ports, services, and versions on a host and hand a clean, machine-readable service
+inventory to downstream per-service skills.
 
 ## Steps
-1. **Precondition / scope.** Confirm `target` is in scope. Record the confirmation so it is
-   verifiable, then anchor a timestamped run directory to the repo root (never write under
-   `skills/`):
-   ```bash
-   ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_port_scanner="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/port-scanner/$(date -u +%Y%m%dT%H%M%SZ)}"
-   RUN="$OTUS_RUN_port_scanner"
-   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-   mkdir -p "$RUN/scans" "$RUN/notes"
-   echo "target=$target confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
-   : > "$RUN/run.log"
-   ```
-2. **Quick full-port sweep.** Find every open TCP port fast, saving all three formats at once:
-   ```bash
-   nmap -p- --min-rate 2000 -Pn -oA "$RUN/scans/allports" "$target" | tee -a "$RUN/run.log"
-   ```
-   (`-Pn` skips host discovery when ICMP is filtered; drop it if host discovery is wanted.)
-3. **Extract open ports** from the greppable output:
-   ```bash
-   ports="$(grep -oE '[0-9]+/open' "$RUN/scans/allports.gnmap" | cut -d/ -f1 | paste -sd, -)"
-   echo "open ports: ${ports:-none}" | tee -a "$RUN/run.log"
-   ```
-   If `ports` is empty, write a "no open ports" marker to **both** the detail scan file and the
-   handoff summary, then stop — so "ran but empty" stays distinguishable from "didn't run":
-   ```bash
-   if [ -z "$ports" ]; then
-     echo "no open ports" > "$RUN/scans/detail.nmap"
-    echo "no open ports" > "$RUN/findings.md"
-     exit 0
-   fi
-   ```
-4. **Targeted service/version + default scripts** against only the open ports:
-   ```bash
-   nmap -sCV -p"$ports" -Pn -oA "$RUN/scans/detail" "$target" | tee -a "$RUN/run.log"
-   ```
-   (`-sCV` = `-sC` default NSE scripts + `-sV` version detection.)
-5. **Relevant NSE per service (optional, non-intrusive).** Run targeted scripts only for the
-   services found, e.g. SMB enumeration, avoiding intrusive categories unless authorized:
-   ```bash
-   nmap -sV --script=smb-os-discovery -p"$ports" -Pn -oA "$RUN/scans/nse" "$target" | tee -a "$RUN/run.log"
-   ```
-6. **Hand-off / branch.** Summarize open services for downstream skills and write the run record:
-   ```bash
-   { echo "# $target"; grep -E '^[0-9]+/(tcp|udp)[[:space:]]+open' "$RUN/scans/detail.nmap" 2>/dev/null || echo "no open ports"; } > "$RUN/findings.md"
-   ```
-   Then branch by service to per-service skills (SMB → enum4linux-ng/smbmap, HTTP(S) → httpx
-   / ffuf / web skills), and feed `detail.xml` to exploit lookup (`searchsploit --nmap`).
-7. **Write the run record** `run.json` into `$RUN/` (schema in Output formats) capturing intent,
-   per-item status, exit codes, and any hard errors.
+1. Set up the run dir per AGENTS.md (`$RUN`), `mkdir -p "$RUN/scans"`; scope is inherited from `out/<engagement>/scope.txt`.
+2. Full-port sweep (all three formats; `-Pn` when ICMP is filtered): `nmap -p- --min-rate 2000 -Pn -oA "$RUN/scans/allports" "$target" | tee -a "$RUN/run.log"`.
+3. Extract open ports: `ports="$(grep -oE '[0-9]+/open' "$RUN/scans/allports.gnmap" | cut -d/ -f1 | paste -sd, -)"`. If none, write `no open ports` to both `scans/detail.nmap` and `findings.md` and stop (empty ≠ didn't-run).
+4. Service/version + default scripts on open ports only: `nmap -sCV -p"$ports" -Pn -oA "$RUN/scans/detail" "$target" | tee -a "$RUN/run.log"`. Add non-intrusive NSE per service (e.g. `--script=smb-os-discovery`) as needed.
+5. Summarize open services to `findings.md`, feed `detail.xml` to `searchsploit --nmap`, branch by service (SMB→netexec, HTTP→httpx/ffuf), write `run.json`.
 
 ## Modern tooling & alternatives
-`nmap` remains the standard. For a faster initial port discovery, `rustscan` / `masscan` /
-`naabu` can sweep ports, then hand the discovered ports to nmap for `-sCV` service detection.
-Use NSE (`--script`) for scripted per-service checks.
-
-## Output formats
-`-oA <basename>` emits all three formats at once: normal (`.nmap`), greppable (`.gnmap`), and
-XML (`.xml`). The XML feeds `searchsploit --nmap` and reporting; the greppable file is easiest
-to parse for open ports. All scans save under `$RUN/scans/`. The executor also writes a run
-record `$RUN/run.json`:
-```json
-{
-  "skill": "port-scanner",
-  "engagement": "<engagement slug>",
-  "target": "<target>",
-  "run_dir": "out/<engagement>/port-scanner/<timestamp>",
-  "started": "<started: date -u +%Y-%m-%dT%H:%M:%SZ, ISO-8601 UTC>",
-  "finished": "<finished: date -u at finish; must be >= started>",
-  "status": "complete",
-  "summary": "<one line>",
-  "evidence": ["findings.md", "scans/allports.nmap", "scans/detail.nmap"],
-  "items": {
-    "scope-confirmed": { "ok": true, "evidence": "notes/scope.txt" },
-    "allports-scan":   { "ok": true, "evidence": "scans/allports.nmap" },
-    "service-detail":  { "ok": true, "evidence": "scans/detail.nmap" },
-    "handoff-written": { "ok": true, "evidence": "findings.md" }
-  },
-  "errors": []
-}
-```
-`status` ∈ `complete | partial | error`. On a hard failure (nmap missing, network blocked,
-out of scope) set `status: error` and push a human-readable line to `errors[]`.
-
-## RAG / shared data / cross-skill
-Consumes a confirmed in-scope `target` (often an IP/host from subfinder/httpx). The
-XML output feeds exploit-lookup (`searchsploit --nmap`); service results branch to
-`enum4linux-ng`, `smbmap`, and the web skills (httpx → ffuf → nuclei).
-A GTFOBins/HackTricks RAG note helps map a discovered service → next step. No wordlists needed.
+`nmap` stays standard; `rustscan` / `masscan` / `naabu` sweep ports fast, then hand them to nmap for
+`-sCV`. NSE (`--script`) runs scripted per-service checks; `-oA` emits normal/greppable/XML at once.
 
 ## Checklist
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Target confirmed in scope before any active scan
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
     verify: judge
-    evidence: notes/scope.txt
+    evidence: ../../scope.txt
     on_fail: fail
     required: true
   - id: allports-scan
@@ -127,35 +49,15 @@ checklist:
     on_fail: redo-part
     required: true
   - id: service-detail
-    desc: Version/script scan run against discovered open ports
-    verify: contains:(open|no open ports)
+    desc: Version/script scan run against discovered open ports (or "no open ports" marker)
+    verify: nonempty
     evidence: scans/detail.nmap
     on_fail: redo-part
     required: true
-  - id: handoff-written
-    desc: Open services summarized for downstream skills
-    verify: nonempty
-    evidence: findings.md
-    on_fail: redo-part
-    required: false
 ```
 
 ## Notes / pitfalls
-- `-p-` (all 65535 ports) is slow — pair with `--min-rate` or a fast scanner (rustscan/masscan)
-  for the first sweep, then nmap `-sCV` only the open ports.
-- Avoid intrusive NSE categories (`exploit`, `brute`, `dos`) unless explicitly authorized; `-sC`
-  runs only the `default` category.
-- `-Pn` treats the host as online (skips host discovery) — correct when ICMP is filtered, but
-  it can hide that a host is actually down.
-- A step that legitimately finds nothing (no open ports) must still write a "no open ports"
-  marker to both `scans/detail.nmap` and `findings.md` so "ran but empty" ≠ "didn't run".
-- **Save raw evidence to `loot/`** — if a finding (version, status code, response) is used as proof,
-  save the raw response to `loot/` (e.g. `curl -s <url> > loot/<name>.html`) so the reviewer can
-  hard-verify it.
-- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
-  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
-  then hand back. Never retry, reword, split, background, or otherwise bypass the
-  block (see CLAUDE.md).
-- Never write scan output under `skills/`; the run directory is always anchored to the repo
-  root via `git rev-parse --show-toplevel` under `out/<engagement>/port-scanner/<timestamp>/` (git-ignored).
+- `-p-` (all 65535 ports) is slow — pair with `--min-rate` or a fast scanner first, then nmap `-sCV` only the open ports.
+- Avoid intrusive NSE categories (`exploit`, `brute`, `dos`) unless explicitly authorized; `-sC` runs only the `default` category.
+- `-Pn` skips host discovery (treats host as up) — correct when ICMP is filtered, but can mask a host that is actually down.
+- A run that finds nothing must still write the `no open ports` marker to `scans/detail.nmap` and `findings.md`.

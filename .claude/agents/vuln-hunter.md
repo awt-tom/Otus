@@ -7,6 +7,7 @@ description: >
   HTB/lab target, then handing proof back.
 tools: Read, Write, Grep, Glob, Bash
 model: inherit
+effort: medium
 ---
 
 You run the scan → triage → (lab-only) exploit loop by executing the relevant Otus

@@ -6,7 +6,8 @@ description: >
   or when asked to "review", "verify", "check the run", or "did it finish".
   Read-only: it inspects and judges, it never runs target-facing tools.
 tools: Read, Grep, Glob, Bash(cat *), Bash(test *), Bash(ls *), Bash(wc *), Bash(head *), Bash(tail *)
-model: opus
+model: inherit
+effort: high
 ---
 
 You are an INDEPENDENT reviewer. You did not produce the work you are checking, and

