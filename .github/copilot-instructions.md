@@ -27,24 +27,85 @@ continue?" between benign in-scope steps. Only an actual guardrail refusal, a ge
 question, or a hard tool failure halts a run.
 
 ## Engagement workflow
-An engagement proceeds in stages, each producing evidence the next consumes. Runtimes with an agent
-layer delegate these stages to subagents (see `CLAUDE.md`); runtimes without one run the matching
-skill directly and follow the same chain manually.
+Choose work from evidence and the engagement goal, not a compulsory tool chain. HTB/CTF goals are
+the requested user/root flags with real identity/access proof; assessment goals are minimal verified
+impact and an evidence-backed report. Skip irrelevant tools (e.g. public subdomain discovery for one
+internal IP). Discovery feeds a specific hypothesis, confirmation, least-destructive proof, review,
+then a report of achievements and gaps. Triage is mandatory; raw scanner hits are not findings.
 
-1. **Recon / enumeration** — `subfinder` → `httpx` → `port-scanner` → `ffuf`: discover assets, live
-   hosts, open services, and content.
-2. **Scanning** — `nuclei` plus the web-vuln classes (`sqlmap`, `xss`, `ssrf`, `idor`, `burpsuite`):
-   find and triage vulnerabilities (triage is mandatory — never report raw scanner output).
-3. **Access / exploitation** — `exploitation`, `metasploit`, `hydra`, `ssh-foothold`: turn a
-   confirmed vulnerability into a foothold, least-destructive proof first.
-4. **Post-exploitation** — `linpeas`, `privesc-root`, `netexec`, `bloodhound`, `impacket`, `hashcat`:
-   escalate privilege, move laterally, and crack credentials.
-5. **Review** — after **every** stage, verify the run against its `## Checklist` (the `review` skill)
-   before its results are treated as final.
-6. **Report** — at the end of the engagement, compile the reviewed evidence into the deliverable.
+### Coordinator and worker ownership
+These exact, case-sensitive roles own the following skills. This is the routing source of truth.
 
-CTF reverse-engineering and forensics skills (`ghidra`, `pwntools`, `binwalk`, `steghide`,
-`wireshark`) slot in wherever the challenge requires them.
+| Agent | Skills / tasks |
+|---|---|
+| recon-runner | subfinder, httpx, port-scanner, ffuf |
+| vuln-hunter | nuclei, sqlmap, xss, ssrf, idor, burpsuite, exploitation, ssh-foothold, metasploit, linpeas, privesc-root, netexec, bloodhound, impacket, hashcat, hydra, binwalk, steghide, wireshark, ghidra, pwntools |
+| reviewer | review |
+| reporter | Engagement report compilation, not a tool skill |
+
+The parent coordinator alone delegates. Invoke the exact named worker with ONE selected skill,
+profile, engagement, evidence root, checked inputs, finite allocation, hypothesis and useful-progress
+criterion. Workers Read the selected runbook and execute it in their existing context; never invoke
+Skill/Agent to fork again, chain other skills, or start their own reviewers. Direct skill invocation
+uses its owning `agent` with `context: fork`; runtimes without agents execute the selected skill inline.
+Never preload every runbook. Workers return actual run directories, terminal status, coverage/stop
+reason, evidence refs, state/cleanup and a proposed next step; no secrets or raw dumps.
+
+Await each terminal worker handback. Then call `reviewer` with exact skill/run directory and an actual
+UTC timestamp; independently inspect its assigned `review.json` before using results. Report through
+`reporter`, then review the report. No dependent action starts on unfinished work or after a hard
+error/refusal. Setup checks are offline/read-only and are not skill runs or invented engagement evidence.
+
+Before an engagement, verify installed runtime/version, discovery diagnostics, registered role names,
+parent delegation tool, invocation controls and resolved worker permissions. Native `.claude/agents/`
+support is a version prerequisite, not assumed. Missing roles/tools fail setup; no generic fallback or
+fabricated launch. Reviewer has no shell. Reporter local encode/concat/measure commands require actual
+runtime-enforced permissions; `Bash(pattern)` strings/prose alone do not prove a locked shell. If the
+harness resolves them to broad execution or cannot enforce them, stop report assembly and disclose the
+setup limitation. Never widen tools, change permission modes/settings or bypass restrictions. Write
+scope is a role contract, not a filesystem sandbox. After refresh, use named read-only startup checks.
+
+### Progress, allocation and health
+The coordinator exclusively owns private `<root>/<engagement>/notes/progress.md`; workers propose
+updates. Record objective/mode, active work-period UTC start, known services/access (no secrets),
+evidence refs, tested/rejected hypotheses, next task, omissions and checkpoint decisions. Read it on
+resume; explicitly declare a new work period rather than silently resetting time for every worker.
+Standalone skills retain this context in their run's notes. Authorization remains in scope.json only.
+
+Before every task write `notes/task.md`: hypothesis, cheapest discriminating check, input/tool version,
+selected profile/set, finite command/task budget, useful-progress criterion, escalation trigger and
+stop conditions. Reuse reviewed results for unchanged endpoint/profile/version/identity; repeat only
+after a documented relevant change, never copy old evidence as fresh execution. Deep/full-port scans,
+large wordlists, recursion, credential attacks and dumps are conditional branches, not defaults.
+
+Thirty minutes of shared reasoning/execution/review is a progress checkpoint, not a solve guarantee or
+automatic kill. Progress means a meaningful new service/endpoint, verified vulnerability/credential,
+foothold, privilege vector or flag, not log volume. With concrete gains, continue autonomously in
+at most ten-minute extensions with a finite next task; otherwise close with reviewed partial coverage
+and a report. Reassess after tasks/extensions; do not ask permission between authorized benign steps.
+
+Allow one network-heavy job per target; at most two independent workers for different targets or
+offline/read-only review. Serialize authentication/exploitation. Enforce aggregate rates in the
+coordinator; the helper is neither a network sandbox nor a cross-run scheduler. Lower program/runtime
+limits take precedence over runbook starting defaults. A >300-second helper cap needs a recorded
+objective-relevant reason and remains finite.
+
+Preflight binary identity/version/inputs and a few bounded baseline requests. After a normally ended
+pilot, >=10% transport errors over >=20 observed attempts, repeated connection failures or material
+429/503 degradation stop heavy endpoint work. Honor Retry-After without blocking sleeps. One short
+health diagnosis is allowed only without a hard failure/refusal; reduce load in a new justified job,
+never raise it to outrun errors. Unknown metrics remain unknown. Hard failures still stop immediately.
+
+### Review and result eligibility
+Review every terminal skill run once against its declared bounded profile. Task completion, coverage
+and engagement-goal achievement are separate. Check actual events/native files/analysis; generated
+findings.md and empty directories never prove execution. A scoped negative or native-budget partial
+does not require replay to obtain PASS; absent positive proof cannot be claimed. Reviewer requests
+repairs from the coordinator, never contacts targets, replays exploits or expands permissions.
+Terminal partial runs may support only individually verified findings with PASS/FAILED-RECOVERED
+reviews. Hard-error, unfinished, unreviewed and legacy runs stay excluded; a guardrail compliance PASS
+is never a finding. Reports disclose limited/unknown coverage, omissions, goal gaps, time/health stops
+and cleanup owed. Missing optional metadata stays unknown; no migration of historical evidence.
 
 ## Evidence storage and writers
 Evidence root is `$OTUS_HOME` if set, otherwise `<repo>/out` (gitignored). Anchor helper invocations
@@ -54,6 +115,7 @@ An **engagement**, not a session, is the report unit and can span sessions:
 ```text
 <root>/<engagement>/
   scope.json
+  notes/progress.md  # private, coordinator-owned goal and work-period context
   <skill>/<UTC-timestamp>/
     run.json       # structured run + findings, atomic replacement
     events.jsonl   # append-only event objects, per-run seq is authoritative ordering
@@ -115,8 +177,20 @@ never turn an argv command into an interpolated shell string unnecessarily. Clos
 the existing timeout/non-interactive rules. GUI/manual steps save exports and use `event --event marker`
 to record what was actually done, never invent a shell command or a successful scan.
 
-`run` records `cmd_start` before launch, then `cmd` with exit status, and returns the tool's exit code.
-Nonzero exits, failed launch, or caught interruption finalize as error. Stop immediately; enrich an
+`run` records `cmd_start` before launch, then `cmd` with the actual normalized tool exit status.
+It returns that exit unless a helper deadline (124) or interruption (128 + signal) overrides it.
+Optional `execution` event metadata records positive finite timeout/grace seconds, monotonic
+duration, actual signed `child_exit` (null when unobserved), `helper_exit`, `policy`, `outcome`, and `stop`
+(`finished|timeout|interrupted`). A child exiting zero after the helper deadline is still an error.
+`policy` defaults to `strict`. The only expected-nonzero policy is `hashcat-v6.2.6`: direct cracking
+argv with explicit hash mode, positive native `--runtime` below the helper cap, version banner and
+matching final `--status-json` evidence. Exit 1/status 5 with exhausted progress means an exhausted
+attack (possibly with recovered hashes); exit 4/status 11 means `native-budget`, not exhaustion.
+These return helper 0 for handled execution, retain the actual tool exit, and leave the run partial
+until `finish` and review; native-budget cannot be finalized complete. Unsupported versions/argv,
+missing or contradictory status, wrappers and user aborts remain strict errors. Never add arbitrary
+allowed exits. `outcome` is `success|error|exhausted|native-budget`; it does not assert goal success.
+Other nonzero exits, failed launch, or caught interruption finalize as error. Stop immediately; enrich an
 error with `finish --status error` and cleanup/completed/resolution fields as needed, without further
 active steps. Tool-specific benign nonzero outcomes must be explained in the handback, never relabeled
 as success automatically. Successful commands leave the run partial until explicit `finish`.
@@ -140,6 +214,16 @@ Unknown state must never be rendered as unchanged or clean. Findings severity is
 `info|low|medium|high|critical`; optional finding strings: `target`, `description`, `reproduction`,
 `remediation`. CLI finding fields are semicolon-separated; use an evidence document for text containing
 semicolons. `items` is keyed by checklist ID; the reviewer independently verifies each assertion.
+
+Optional run `coverage` is `{"profile":"top-100","declared":"Selected 100 TCP ports",
+"observed":null,"omitted":["Other TCP ports and UDP"],"stop_reason":"completed"}`. Profile is a
+path-free slug, declared/omitted are secret-free descriptions, observed is nonnegative integer or
+null (unknown), not a guessed count. Stop reason is `unknown|completed|native-budget|health|
+inconclusive|helper-timeout|interrupted|error`. Declare with `init --profile --coverage-set` and
+finalize with `finish --observed --omitted --stop-reason` as applicable. Missing coverage in @1
+records stays unknown; never migrate historical records. Complete describes the declared task, not
+exhaustive coverage or the engagement goal. Early/native-budget/inconclusive stops remain terminal
+partial, hard failures remain error. Review verifies these declarations against actual artifacts.
 
 **scope.json — authorization record**
 ```json
@@ -211,8 +295,11 @@ a socket open hangs the whole run. Every command MUST be non-blocking:
 - **Pass non-interactive flags and close stdin:** `ssh -o BatchMode=yes -o ConnectTimeout=10`
   (key or `sshpass -p '<pw>' ssh …` — never an interactive password prompt), `sqlmap --batch`,
   `apt-get -y`; append `< /dev/null` to anything that might read stdin.
-- **Bound every target-facing command with `timeout`** (e.g. `timeout 300 nmap …`) so a stall ends
-  the command, not the run.
+- **Bound every executable with helper `run --timeout SECONDS --grace SECONDS`.** Defaults are
+  300 seconds and a 5-second grace (maximum 30); durations must be positive and finite. Prefer a
+  shorter native tool budget so results flush before the helper deadline. Graceful process-group
+  termination precedes forced kill; capture/reaping is bounded. Local shutdown does not prove a
+  remote process stopped: retain remote-native bounds and record uncertain state/cleanup.
 - A command that blocks, times out, or needs a prompt is a **tool failure**, not a guardrail: record
   it, set `run.json` `status:"error"`, write `findings.md`, hand back. Do not retry it interactively.
 
@@ -254,8 +341,14 @@ GitHub Copilot auto-includes this file in every chat/agent session for this repo
 is authoritative; the per-tool runbooks live under `.claude/skills/<tool>/SKILL.md` and the authoring
 spec in `docs/authoring.md`.
 
-- Point Copilot's `skillDirectories` config at `./.claude/skills` so it can load the skills (flat,
-  one tool-named folder per skill — verify the key name in your Copilot setup).
+- Supported VS Code runtimes discover `.claude/skills/` and native `.claude/agents/*.md`.
+  Verify installed-version support and discovery diagnostics; do not assume unknown config keys.
+- Select the generated `.github/agents/otus.agent.md` coordinator, or use built-in Agent with
+  the same canonical named delegation. The parent must have the agent tool and invoke the exact
+  recon-runner, vuln-hunter, reviewer and reporter roles; no handoff-button or generic-agent substitute.
+  Workers Read/execute only the assigned runbook without nested forks. Await actual handbacks.
+- Agent/tool metadata is runtime-dependent. Check resolved permissions: reviewer has no execution;
+  reporter cannot assemble with broad execute. Fail setup closed instead of widening capabilities.
 - When writing or editing a skill, follow `docs/authoring.md` and `templates/SKILL.template.md`
   exactly: keep skills flat at `.claude/skills/<tool>/SKILL.md`, never invent tool flags, and never
   restate this contract in a skill body — reference it with the single line

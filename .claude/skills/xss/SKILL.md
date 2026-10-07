@@ -8,8 +8,9 @@ description: >
 arguments: "target_or_urls [param]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: web
 domain: web
 ---
@@ -23,11 +24,11 @@ Find and confirm XSS (reflected / stored / DOM) on an in-scope target by matchin
 exact output context, then produce a minimal, non-destructive proof-of-concept and impact note.
 
 ## Steps
-1. Gather candidate inputs. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill xss)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; for batches use `--targets-file "$HOSTS"`. Nonzero STOP; check each new endpoint before testing.
-2. **Context analysis (per input).** For each reflected/stored value, identify the **output context** — HTML body, tag attribute, JS string/template, URL, or CSS — since the context dictates the breakout. Record each sink + context in `notes/contexts.md`.
-3. **Payload per sink (RAG-driven).** Pull context-appropriate payloads from the shared RAG (PayloadsAllTheThings/XSS + HackTricks); do **not** hardcode a payload library here. Start with a harmless reflection probe, then the context-specific breakout.
-4. **Discovery:** all dalfox/verification commands use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- <original argv>` (single endpoint: `--target "$TARGET"`). Save browser/Burp evidence and `event --event marker` entries for manual steps.
-5. Confirm only benign execution (`alert(document.domain)` or an authorized callback), never cookie theft/defacement. Save context/payload/impact proof to `evidence/`. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'contexts-analysed=ok:notes/contexts.md' --item 'tested=ok:findings.md' --item 'confirmed-poc=ok:findings.md'`; add verified `--finding` entries and actual cleanup fields, or summary `no xss confirmed`.
+1. Select <=3 relevant sinks, not every input. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill xss --profile selected-sinks --coverage-set 'At most three candidate sinks')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; batches use `--targets-file "$HOSTS"`; nonzero STOP. Write notes/task.md with hypothesis, version/inputs and a 120-second initial task allocation.
+2. Trace selected values into HTML/attribute/JS/URL/CSS context; for DOM XSS establish source-to-sink flow. Record actual contexts/untested cases in notes/contexts.md; reflection alone is not execution.
+3. Choose a benign context-specific probe from verified documentation/RAG. No whole-input spray or automatic payload ladder. All CLI discovery/verification uses `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 120 -- <verified bounded argv>`; batch commands check the complete HOSTS list and fit the remaining task allocation.
+4. Save actual responses and browser/Burp exports, with marker events for manual actions. Confirm only benign execution, never cookie theft/defacement. Record execution proof or explicit no-confirmation/GUI limitation in evidence/verification.md, referencing actual files; a marker or reflection cannot substitute for browser proof. Any callback requires its own endpoint gate.
+5. Completed selected tests -> complete/completed; missing browser, native budget or inconclusive case -> partial, no false negative or replay. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other sinks and payload families' --item 'scope-confirmed=ok:../../scope.json' --item 'contexts-analysed=ok:notes/contexts.md' --item 'tested=ok:events.jsonl' --item 'confirmed-poc=ok:evidence/verification.md'`; claim only evidenced items/findings and actual state/cleanup. Return to the coordinator.
 
 ## Modern tooling & alternatives
 `dalfox` is the current standard for XSS discovery/verification; Burp Suite (Repeater/Intruder, DOM
@@ -49,15 +50,15 @@ checklist:
     on_fail: redo-part
     required: true
   - id: tested
-    desc: XSS testing executed (dalfox/manual); run marker written (even if nothing confirmed)
-    verify: nonempty
-    evidence: findings.md
+    desc: Events plus actual requests/exports substantiate the selected tests or disclosed omissions
+    verify: judge
+    evidence: events.jsonl
     on_fail: redo-skill
     required: true
   - id: confirmed-poc
     desc: Each confirmed XSS has a minimal, non-destructive PoC + impact (or documented "none")
     verify: judge
-    evidence: findings.md
+    evidence: evidence/verification.md
     on_fail: fail
     required: true
 ```
@@ -66,4 +67,4 @@ checklist:
 - **Context is everything** — the same payload that fires in an HTML body is inert in a JS string or attribute; analyse the sink before picking a payload.
 - **Benign PoC only.** `alert(document.domain)` / authorized callback — never steal real users' cookies, deface, or auto-exfiltrate; `confirmed-poc` fails hard (`on_fail: fail`).
 - DOM XSS needs source→sink tracing in the browser/Burp DOM Invader, not just server reflection. Keep payloads in RAG, not inline, so they stay current.
-- No XSS still finishes with that summary; findings.md is generated.
+- No proof is required for a truthful scoped negative; every claimed execution requires real evidence.

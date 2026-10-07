@@ -6,8 +6,9 @@ description: >                    # TRIGGER TEXT — "Use when <task>, with <too
 arguments: "<positional args>"   # required first, optional in [brackets]; keep to <= 3-4
 model: inherit                    # always 'inherit' — use the session model; never hardcode sonnet/opus/haiku
 effort: low | medium | high       # by weight — see docs/authoring.md "Model / effort convention"
-context: inline | fork            # 'fork' runs the body in a forked subagent
-agent:                            # only when context: fork (e.g. Explore, general-purpose)
+context: fork                     # direct invocation forks into the canonical owner
+agent: <owner>                    # exact role from AGENTS.md; never a generic substitute
+background: false                # await terminal handback before dependent work
 category: recon | web | access | ad-network | privesc-creds | re-forensics | meta
 domain: web | ad | network | host | crypto | binary | forensics | misc
 ---
@@ -17,15 +18,15 @@ domain: web | ad | network | host | crypto | binary | forensics | misc
 Shared contract: see AGENTS.md.
 
 ## Goal (desired outcome)
-What a successful run produces and why you'd reach for this. 1-2 sentences.
+What this selected bounded task proves, for which goal, and what it cannot establish. 1-2 sentences.
 
 ## Steps
-1. Set inputs from the user. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill <tool>)"`.
+1. Select the cheapest discriminating test from checked inputs. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill <tool> --profile "$PROFILE" --coverage-set "$COVERAGE")"`.
   `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Use `--targets-file "$HOSTS"` for batches; offline work omits target options.
-2. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <exact original executable argv>`; all active commands use this wrapper, including verification. Offline work omits target options; GUI work saves exports and records `event --event marker` instead.
-3. Decision point: if X then …, else …
-4. Verify / triage the results (drop false positives; keep only real findings).
-5. Preserve raw outputs and empty-result markers; name the next skill. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json'`; add actual checklist items, verified `--finding` entries, and target-state/cleanup fields. Error paths and rendered findings follow AGENTS.md; never hand-write JSON or findings.md.
+2. Write notes/task.md with hypothesis, version/inputs, profile, finite total/command budget, useful-progress criterion, escalation trigger and stop conditions. Verify identity/help before contact; choose a native budget below the helper cap where supported.
+3. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 60 --grace 5 -- <exact verified bounded argv>`; replace 60 with the justified finite cap. Offline work omits target options; GUI work saves real exports and `event --event marker`, not invented commands.
+4. Inspect actual native coverage/health, then minimal verification/triage. A larger/deeper test needs a specific lead and remaining allocation, never an empty-result ladder. Preserve native empty files unchanged; notes/assessment.md describes scoped negative, partial or error and evidence refs.
+5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted "$OMITTED" --item 'scope-confirmed=ok:../../scope.json'`; add supported items/findings and actual state/cleanup. Update profile/set if a justified branch changed it; --observed only from native accounting. Return next-task proposal to coordinator, no worker chain. Review uses its locked verdict-writing exception, not this executable lifecycle.
 
 ## Modern tooling & alternatives
 Current best-in-class, notable flags, and the legacy tools this replaces. Note version-sensitive
@@ -40,12 +41,12 @@ checklist:
     evidence: ../../scope.json
     on_fail: fail
     required: true
-  # --- tool-unique items below: 3-6 that prove THIS tool actually ran and produced real results ---
+  # --- tool-unique items: selected execution, actual coverage and conditional proof ---
   - id: <step-id>
-    desc: What this evidence proves
-    verify: nonempty      # one of: exists | nonempty | contains:<regex> | min-lines:<n> | exit-zero | judge
-    evidence: <path relative to the run dir>
-    on_fail: redo-part    # one of: redo-part | redo-skill | fail
+    desc: What events and native artifacts independently prove for the declared profile
+    verify: judge        # existence/markers alone do not prove execution or impact
+    evidence: <actual event/native/analysis path relative to the run dir>
+    on_fail: fail        # redo-part/redo-skill recommend permitted coordinator repairs, not active replay
     required: true
 ```
 

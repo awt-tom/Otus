@@ -54,7 +54,7 @@ Grouped by `category`; each row is **name** — description — _(domain)_.
 
 ### meta
 
-- **review** — Use after running any skill to verify it actually completed every required part. Independently re-checks each checklist item against the evidence on disk (not the executor's self-report), then redoes the missing part, redoes the whole skill, or reports failure to the user. Trigger with "review", "verify", "did it finish", "check the <skill> run". _(misc)_
+- **review** — Use after a terminal skill or report run to independently verify its declared profile, actual evidence, coverage and conditional proof claims. Read-only verification requests permitted local repairs from the coordinator, never replays target actions. Trigger with "review", "verify", "did it finish", or "check the <skill> run". _(misc)_
 
 ## By domain
 
@@ -108,4 +108,4 @@ Grouped by `domain`; each row is **name** — description — _(category)_.
 
 ### misc
 
-- **review** — Use after running any skill to verify it actually completed every required part. Independently re-checks each checklist item against the evidence on disk (not the executor's self-report), then redoes the missing part, redoes the whole skill, or reports failure to the user. Trigger with "review", "verify", "did it finish", "check the <skill> run". _(meta)_
+- **review** — Use after a terminal skill or report run to independently verify its declared profile, actual evidence, coverage and conditional proof claims. Read-only verification requests permitted local repairs from the coordinator, never replays target actions. Trigger with "review", "verify", "did it finish", or "check the <skill> run". _(meta)_

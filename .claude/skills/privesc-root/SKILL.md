@@ -8,8 +8,9 @@ description: >
 arguments: "target [vector]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: privesc-creds
 domain: host
 ---
@@ -19,20 +20,19 @@ domain: host
 Shared contract: see AGENTS.md.
 
 ## Goal
-Turn a confirmed vector into verified root on an authorized host: execute the escalation, capture a
-non-destructive transcript proving `uid=0(root)`, and record the root flag — certifiable evidence, not a self-report.
+Test one confirmed privilege vector and capture real elevated identity/access proof.
+Flags belong only to an HTB/CTF objective; missing proof is a goal gap, not a replay trigger.
 
 ## Steps
-1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill privesc-root --target "$TARGET")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Record the explicit one-shot SSH/webshell/RCE transport in `notes/transport.txt`.
-2. **Enumerate + identify the vector.** Run `linpeas` plus, in the foothold, `uname -a; sudo -l; find / -perm -4000 -type f 2>/dev/null; getcap -r / 2>/dev/null` → `notes/enum.txt`; capture the vulnerable service's exact version; `searchsploit <service/version>` (local) maps version→exploit. Record the chosen vector + exact version/ref in `notes/version.txt`.
-3. Every enum/escalation/proof command uses `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <original bounded transport argv>`. Save full escalation transcript to `loot/root-shell.log`; a failed action is not replayed.
-4. **Prove root (non-destructive).** In the root context run read-only checks `id; whoami; hostname` → `loot/root-proof.txt` — this transcript is the certifiable proof and must show `uid=0`.
-5. Capture `cat /root/root.txt` through the same helper/transport to `loot/root-flag.txt`, never metadata. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'transport-recorded=ok:notes/transport.txt' --item 'vector-identified=ok:notes/version.txt'`; add root-proof item and verified `--finding` only for actual uid=0 evidence. Otherwise partial/error; include actual artifacts and cleanup fields.
+1. Reuse ONE reviewed vector and proved foothold transport. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill privesc-root --target "$TARGET" --profile selected-vector --coverage-set 'One privilege vector and elevated identity proof')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with known identity, hypothesis, <=120-second command caps/finite total allocation and minimum proof; record transport in notes/transport.txt.
+2. Cheapest specific prerequisite check only; no re-running linpeas, filesystem-wide finds or default kernel exploits. Record exact rule/path/permission/version and matched/unmet prerequisites in notes/version.txt. If selected, `sudo -n -l` is its own bounded one-shot; denial is recorded error, never an interactive retry or masked success. No applicable vector -> partial, no firing.
+3. Escalation/proof CLI: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 120 --grace 5 -- <verified one-shot transport argv>` with remote-native bounds fitting remaining allocation. Save the real transcript; hard failure stops, no replay. Capture `id && whoami && hostname` in the established elevated context to loot/root-proof.txt without rerunning an actionful escalation. Target proof is not a local operator `id` or a fabricated marker.
+4. Read the known /root/root.txt only for a flag objective and actual established access; store private loot/root-flag.txt. Assessment needs minimum proved privilege/impact, not the flag. Record exact mutations and positive cleanup absence checks, or owed/unknown remote state after failure.
+5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other privilege vectors and post-exploitation' --item 'scope-confirmed=ok:../../scope.json' --item 'transport-recorded=ok:notes/transport.txt' --item 'vector-identified=ok:notes/version.txt'`; add root-proof/finding only for real identity evidence, otherwise partial/error with goal gap and actual state/artifacts/cleanup. Return to coordinator, never start another skill.
 
 ## Modern tooling & alternatives
-Enumerate first with `linpeas`/`pspy`; map findings to abuse via **GTFOBins / LOLBAS** and kernel/OS
-exploits via `linux-exploit-suggester` / `wesng`. Service CVEs from `searchsploit`/ExploitDB — a single
-hand-written PoC is often cleaner than a framework. Prefer least-destructive; kernel exploits (can crash the host) are a last resort.
+Reuse reviewed GTFOBins/LOLBAS/CVE prerequisites; kernel exploits are an exceptional last resort.
+Do not repeat broad enumeration merely because a root flag has not yet been reached.
 
 ## Checklist
 ```yaml
@@ -56,11 +56,11 @@ checklist:
     on_fail: redo-part
     required: true
   - id: root-proof
-    desc: Captured transcript proves root (uid=0) non-destructively
-    verify: contains:uid=0
+    desc: Every claimed elevation has actual target identity/access proof; absent proof is partial
+    verify: judge
     evidence: loot/root-proof.txt
-    on_fail: redo-skill
-    required: true
+    on_fail: fail
+    required: false
 ```
 
 ## Notes / pitfalls

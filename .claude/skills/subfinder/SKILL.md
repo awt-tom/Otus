@@ -9,7 +9,8 @@ arguments: "domain [output]"
 model: inherit
 effort: low
 context: fork
-agent: Explore
+agent: recon-runner
+background: false
 category: recon
 domain: network
 ---
@@ -23,10 +24,11 @@ Produce a fast, passive, de-duplicated list of subdomains for an in-scope apex d
 list ready to resolve and probe downstream.
 
 ## Steps
-1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill subfinder --target "$domain")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$domain" --run-dir "$RUN"`; nonzero STOP.
-2. **Passive enumeration:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$domain" -- subfinder -d "$domain" -all -recursive -silent -o "$RUN/subs.txt"`. Add `-oJ -o "$RUN/subs.jsonl"` for host/source records.
-3. **Optional merge:** export `domain RUN`; `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$domain" -- bash -o pipefail -c 'assetfinder --subs-only "$domain" | anew "$RUN/subs.txt" >/dev/null'`. Check newly discovered hosts before probing them.
-4. Keep `subs.txt` a pure host list; summary is count or `no subdomains found`. Feed it to dnsx/httpx. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status complete --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'enum-ran=ok:findings.md' --item 'handoff-written=ok:subs.txt' --target-state unchanged --cleanup not-needed`.
+1. Use only for an actual apex-domain discovery goal; skip an isolated internal IP/.htb host. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill subfinder --target "$domain" --profile passive-quick --coverage-set 'Default passive sources, at most one native minute')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$domain" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, source/version choice, total allocation and escalation trigger.
+2. Verify binary/version/help before provider activity: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --timeout 10 -- subfinder -version`. Inspect supported flags/source configuration; secrets stay out of notes.
+3. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$domain" --timeout 75 --grace 5 -- subfinder -d "$domain" -silent -timeout 5 -max-time 1 -o "$RUN/subs.txt"`. Native `-max-time` is minutes; outer slack permits flushing. No default all-source/recursive discovery, extra-tool merge or active DNS brute force.
+4. Preserve native subs.txt; save a deduplicated pure host list in notes/hosts.txt. Empty discovery is valid. Assess completed/skipped sources, native stop and limitations in notes/coverage.md; no claims that passive discovery is exhaustive. Every discovered host needs a fresh check before a downstream worker probes it; return the list to the coordinator, do not start httpx.
+5. Native early/skipped/inconclusive -> partial with the actual STOP; selected sources finished -> complete/completed; helper failure -> error, stop. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Unselected providers, active DNS and nested discovery' --item 'scope-confirmed=ok:../../scope.json' --item 'enum-ran=ok:events.jsonl' --item 'handoff-written=ok:notes/hosts.txt' --item 'coverage-assessed=ok:notes/coverage.md' --target-state unchanged --cleanup not-needed`; count only observed hosts, not guessed source coverage.
 
 ## Modern tooling & alternatives
 ProjectDiscovery `subfinder` is the standard for passive discovery. Pair with `amass` (more thorough,
@@ -43,26 +45,25 @@ checklist:
     on_fail: fail
     required: true
   - id: enum-ran
-    desc: Passive enumeration executed; run marker written (even if empty)
-    verify: nonempty
-    evidence: findings.md
+    desc: Paired command events and native output substantiate the bounded passive attempt
+    verify: judge
+    evidence: events.jsonl
     on_fail: redo-skill
     required: true
-  - id: subdomains-found
-    desc: At least one subdomain discovered (empty is a valid outcome)
-    verify: min-lines:1
-    evidence: subs.txt
-    on_fail: redo-part
-    required: false
   - id: handoff-written
     desc: Clean subdomain list file exists for downstream resolve/probe
-    verify: exists
-    evidence: subs.txt
+    verify: judge
+    evidence: notes/hosts.txt
     on_fail: redo-part
+    required: true
+  - id: coverage-assessed
+    desc: Source omissions, native stop, health and any deeper-discovery proposal are truthful
+    verify: judge
+    evidence: notes/coverage.md
+    on_fail: fail
     required: true
 ```
 
 ## Notes / pitfalls
-- **Passive only** — low noise and a safe default; it does not actively resolve or brute-force DNS (that is `dnsx`/brute skills downstream).
-- No discoveries still finish with `no subdomains found` and a clean empty `subs.txt`.
-- Keep `subs.txt` a pure host list fed verbatim to `dnsx`/`httpx` — the marker goes in `findings.md`, never in `subs.txt`.
+- Native time limit or failed providers do not establish absence of subdomains. Unknown source counts stay unknown.
+- Deeper passive sources require a domain objective/lead and a new finite allocation, not an automatic merge ladder.

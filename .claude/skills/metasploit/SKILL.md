@@ -9,8 +9,9 @@ description: >
 arguments: "target_host [service_or_cve] [lhost]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: access
 domain: host
 ---
@@ -20,15 +21,15 @@ domain: host
 Shared contract: see AGENTS.md.
 
 ## Goal
-Select, configure, and run the right exploit/auxiliary module against an authorized target — validate
-with `check` before firing, deliver a payload, and manage the session, capturing the full transcript.
+Run one applicable exploit/auxiliary hypothesis with minimum verified impact and separate check/run
+decisions. A session, payload or post-exploitation ladder is not mandatory.
 
 ## Steps
-1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill metasploit)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Check every RHOSTS entry, not just one; record LHOST and module/options without secrets.
-2. Wrap one-shot `msfconsole -q -x "workspace -a <engagement>; search <service/cve>; use <module>; set RHOSTS <target>; set LHOST <you>; set payload <payload>; check; run; sessions -l; exit"` with `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --` (batch: `--targets-file "$HOSTS"`). Only run after a separately inspected check result; the helper replaces the logging-only spool. Record options in `notes/modules.txt`.
-3. **`check` before `run`.** Only `run`/`exploit` on a positive (or deliberately-justified) `check`. **Never** Autopwn / browser_autopwn (OSCP-banned, indiscriminate).
-4. **Session / post-ex.** On a session: `sessions -i <id>`, run post modules, `migrate`, loot; `db_export -f xml "$RUN/workspace.xml"` to save the workspace.
-5. All post-ex commands remain one-shot/helper-wrapped; never hold a REPL/session. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'module-selected=ok:notes/modules.txt' --item 'run-executed=ok:findings.md' --item 'check-before-run=ok:run.log'`; add verified `--finding` proof and actual artifacts/cleanup fields. Summary records `no session` when applicable.
+1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill metasploit --profile selected-module --coverage-set 'One configured module and separately inspected check/run')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Check every RHOSTS/callback endpoint. Write notes/task.md with matched version, hypothesis, <=300-second total task and <=120-second check/run caps; record verified module/options/effects in notes/modules.txt.
+2. Inspect source/options and cheap prerequisites first. Supported check only: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 120 --grace 5 -- msfconsole -q -x "use $MODULE; set RHOSTS $TARGET; check; exit"`; include validated required options, batches with `--targets-file "$HOSTS"`. Save actual transcript refs and applicability in notes/check.md; never combine check and run in one invocation.
+3. Inspect the terminal check BEFORE deciding execution. No positive applicability -> partial/no run; unsupported check needs independent evidence and an explicit recorded rationale, not automatic firing. Hard check errors stop. Selected run is a separate helper-wrapped <=120-second one-shot with module-native bounds and minimum proof; no indefinite handler, interactive session, migrate, autopwn or mandatory payload.
+4. Record actual module result/raw output, observed coverage and minimal impact in notes/assessment.md and evidence/proof.txt when proved. A console exit zero or session banner alone is not proof. No impact remains partial, not a reason to replay; record created artifacts and remote-job/cleanup uncertainty, never presume local shutdown stopped remote work.
+5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other modules and post-exploitation' --item 'scope-confirmed=ok:../../scope.json' --item 'module-selected=ok:notes/modules.txt' --item 'run-executed=ok:notes/assessment.md' --item 'check-before-run=ok:notes/check.md'`; add only proved findings with actual state/artifacts/cleanup. Return achieved impact or scoped limitations to coordinator.
 
 ## Modern tooling & alternatives
 `msfconsole` is still the standard framework. For manual / OSCP-style work prefer single exploits from
@@ -45,21 +46,21 @@ checklist:
     on_fail: fail
     required: true
   - id: module-selected
-    desc: Module searched, selected, and configured (RHOSTS/LHOST/payload) — recorded
-    verify: nonempty
+    desc: Exact module/version/options and effects match the selected hypothesis
+    verify: judge
     evidence: notes/modules.txt
     on_fail: redo-part
     required: true
   - id: run-executed
-    desc: Module executed; run marker written (even if no session opened)
-    verify: nonempty
-    evidence: findings.md
-    on_fail: redo-skill
+    desc: Events/raw output substantiate actual result or justified withheld execution and coverage
+    verify: judge
+    evidence: notes/assessment.md
+    on_fail: fail
     required: true
   - id: check-before-run
-    desc: '`check` used before `run` where supported; no Autopwn/browser_autopwn (OSCP-banned)'
+    desc: Terminal check independently inspected before run, or unsupported check rationale evidenced
     verify: judge
-    evidence: run.log
+    evidence: notes/check.md
     on_fail: fail
     required: true
 ```

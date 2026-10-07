@@ -8,8 +8,9 @@ description: >
 arguments: "target_or_urls [second_account]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: web
 domain: web
 ---
@@ -24,15 +25,15 @@ data; vertical: higher-privilege actions) and prove it with a minimal, non-destr
 an authorization matrix.
 
 ## Steps
-1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill idor)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Use two controlled test accounts/roles; account creation is a state change requiring recorded cleanup.
-2. **Enumerate object identifiers.** Map endpoints that take an object reference (`/users/123`, `?id=`, `?file=`, UUIDs, hashids) from `httpx`→`katana`/`ffuf`/Burp; record ID format (sequential/UUIDv4/hash) and ownership in `notes/objects.md`.
-3. **Swap / escalate.** With account A's session, request account B's object IDs (**horizontal**); then attempt higher-privilege objects/actions and admin-only methods (**vertical**). Test method/param tampering (GET↔POST, role fields); compare to the legitimate owner's response.
-4. **Authorization matrix.** Build a `{account/role} × {object/action}` → allowed/denied/leaked grid in `notes/authz-matrix.md` so access gaps are explicit and reviewable.
-5. CLI requests use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- <original argv>`; manual requests save cases and marker events. Confirm one controlled record, not a mass dump. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'ids-enumerated=ok:notes/objects.md' --item 'authz-matrix=ok:notes/authz-matrix.md' --item 'confirmed-impact=ok:findings.md'`; add verified `--finding` entries referencing cases and actual cleanup fields, or summary `no idor confirmed`.
+1. Select <=3 object/action pairs and two existing controlled accounts/roles; initial task 120 seconds. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill idor --profile controlled-pairs --coverage-set 'At most three controlled object/action pairs')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, ownership, allocation and minimum proof. Missing second identity -> not-tested/partial, not a negative; no automatic account creation.
+2. Reuse known endpoints/identifiers, record formats and actual A/B ownership in notes/objects.md. No mass ID enumeration, crawler or automatic method/role tampering ladder.
+3. For each selected pair compare the owner's response with A requesting B's known controlled object, or one specifically justified role action. Use a read-only/minimal reversible case; no deletion/modification of others' data. Save actual cases and compare contents, not status codes alone.
+4. Build notes/authz-matrix.md with identity/role, controlled object/action, expected/actual allowed-denied-leaked result, case refs and explicit untested/omitted pairs. Tokens stay only in private raw evidence.
+5. CLI: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 120 -- <verified bounded request argv>`; shorter native timeouts fit the remaining allocation. Manual cases require real exports/marker events. Save proof or no-confirmation/limitations in evidence/verification.md. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Unselected objects, roles and actions' --item 'scope-confirmed=ok:../../scope.json' --item 'ids-enumerated=ok:notes/objects.md' --item 'authz-matrix=ok:notes/authz-matrix.md' --item 'confirmed-impact=ok:evidence/verification.md'`; complete only finished pairs, otherwise partial/error with actual state/cleanup. Return to coordinator, no replay for missing goal proof.
 
 ## Modern tooling & alternatives
 Mostly manual via Burp Suite — **Autorize** / **AuthMatrix** automate the A-vs-B replay; Repeater/
-Intruder for ID iteration; `ffuf` to enumerate ID ranges. No single CLI tool; the value is the
+Intruder for selected controlled cases. No single CLI tool; the value is the
 systematic authz matrix.
 
 ## Checklist
@@ -45,21 +46,21 @@ checklist:
     on_fail: fail
     required: true
   - id: ids-enumerated
-    desc: Object-referencing endpoints and their ID formats mapped
-    verify: nonempty
+    desc: Selected endpoints, formats and controlled ownership or missing prerequisite disclosed
+    verify: judge
     evidence: notes/objects.md
     on_fail: redo-part
     required: true
   - id: authz-matrix
-    desc: Account/role x object/action authorization matrix built
-    verify: nonempty
+    desc: Actual A/B comparisons and raw cases support matrix; untested pairs explicitly marked
+    verify: judge
     evidence: notes/authz-matrix.md
     on_fail: redo-part
     required: true
   - id: confirmed-impact
     desc: Confirmed IDOR/BOLA has minimal non-destructive proof + impact (or documented "none")
     verify: judge
-    evidence: findings.md
+    evidence: evidence/verification.md
     on_fail: fail
     required: true
 ```

@@ -9,7 +9,8 @@ arguments: "hosts [severity] [output]"
 model: inherit
 effort: medium
 context: fork
-agent: general-purpose
+agent: vuln-hunter
+background: false
 category: web
 domain: web
 ---
@@ -19,20 +20,20 @@ domain: web
 Shared contract: see AGENTS.md.
 
 ## Goal
-Scalable, low-false-positive detection of known CVEs, misconfigurations, exposures, and takeovers
-across many hosts — producing a triaged, verified findings set (never raw scanner output).
+Test a small technology-relevant set of cached templates and independently triage each hit.
+No hits means only no confirmed result in the declared template/endpoint set.
 
 ## Steps
-1. Point `HOSTS` at a plain live-host/URL list. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill nuclei)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; on nonzero STOP. Resolve vhosts per AGENTS.md before contact.
-2. **Update & verify templates.** `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- nuclei -update-templates`; confirm the store is non-empty. If the successful update downloaded nothing, wrap `git clone https://github.com/projectdiscovery/nuclei-templates ~/nuclei-templates` with the same helper, then scan with `-t ~/nuclei-templates`. Record the path/count in `notes/templates.txt`; hard failures STOP.
-3. **Scan:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" -- nuclei -l "$HOSTS" -severity critical,high,medium -dr -mhe 30 -o "$RUN/nuclei.txt"`. Keep timeout rules from AGENTS.md. `-dr` disables redirects; `-mhe 30` raises max-host-errors. Add `-jsonl`, `-tags cve,takeover,exposure`, `-t <path>`, or bounded `-rate-limit`/`-c` as appropriate.
-4. **Marker if empty:** `[ -s "$RUN/nuclei.txt" ] || echo "no findings" > "$RUN/nuclei.txt"` so "found nothing" ≠ "didn't run".
-5. **Triage:** verify every hit using helper-wrapped commands with its checked endpoint; write `triage.md`, including no-hit results. Then `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status complete --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'templates-updated=ok:notes/templates.txt' --item 'scan-ran=ok:nuclei.txt' --item 'triaged=ok:triage.md' --target-state unchanged --cleanup not-needed`; add `--finding 'title=...;severity=...;evidence=triage.md'` only for verified hits. Never report raw scanner hits.
+1. Use a small plain HOSTS URL list. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill nuclei --profile selected-templates --coverage-set 'At most 20 technology-relevant cached templates')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, endpoint count, 180-second command allocation and escalation trigger.
+2. Verify installed Nuclei/version/help and cached templates locally; no per-target update/clone. Record exact <=20 selected template paths/versions and applicability in notes/templates.txt; TEMPLATES names only those paths, not an entire store. Inspect induced endpoints and exclude code/headless/DoS/brute/fuzz behavior. No authorized usable cache -> setup limitation, no scan.
+3. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" --timeout 180 --grace 5 -- nuclei -l "$HOSTS" -t "$TEMPLATES" -c 2 -bs 1 -rate-limit 10 -timeout 5 -retries 0 -mhe 5 -dr -ni -duc -no-stdin -jsonl -o "$RUN/evidence/nuclei.jsonl"`. Disable redirects/OOB/update checks; every induced destination must remain checked. An explicitly authorized collaborator is a separate justified configuration.
+4. Preserve empty native JSONL unchanged. Read completion/skip/error counters from raw output, assess native host/template skips and actual coverage in notes/coverage.md; exit zero alone is not full coverage. Unknown counts remain unknown; stop heavy work on degraded health. Broader template sets need a matched lead or declared assessment coverage requirement, not severity broadening alone.
+5. Verify each candidate with a minimal checked request within the task allocation; save raw requests/responses and notes/triage.md, including scoped no-hit/false-positive results. Verification CLI: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 15 -- <verified one-shot argv>`. If allocation ends before triage, remain partial and do not claim an unverified finding.
+6. Complete only the actually finished selected task; native skips/budget -> partial, hard failure -> error and stop. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Unselected templates and endpoints' --item 'scope-confirmed=ok:../../scope.json' --item 'templates-selected=ok:notes/templates.txt' --item 'scan-ran=ok:events.jsonl' --item 'triaged=ok:notes/triage.md' --item 'coverage-assessed=ok:notes/coverage.md'`; add only evidence-backed findings and actual target-state/cleanup fields. Return to coordinator for review.
 
 ## Modern tooling & alternatives
-*The* current scanner. Templates live in `~/nuclei-templates` + `/usr/share/nuclei-templates`; write
-custom templates for program-specific checks. Companions: `nikto` (server misconfig), `dalfox` (XSS),
-`testssl.sh` (TLS).
+Use locally reviewed/versioned templates; updates are separate setup work, not a per-target stage.
+Minimal manual requests confirm candidates without a broad scanner chain.
 
 ## Checklist
 ```yaml
@@ -43,28 +44,32 @@ checklist:
     evidence: ../../scope.json
     on_fail: fail
     required: true
-  - id: templates-updated
-    desc: nuclei-templates updated and verified non-empty before the scan
-    verify: nonempty
+  - id: templates-selected
+    desc: Selected cached paths/version/applicability and induced endpoints verified before contact
+    verify: judge
     evidence: notes/templates.txt
     on_fail: redo-part
     required: true
   - id: scan-ran
-    desc: Scan executed against the live-host list (marker written if no findings)
-    verify: exists
-    evidence: nuclei.txt
+    desc: Paired events and unchanged native output substantiate the bounded attempt
+    verify: judge
+    evidence: events.jsonl
     on_fail: redo-skill
     required: true
   - id: triaged
     desc: Findings manually verified / false-positives dropped
     verify: judge
-    evidence: triage.md
+    evidence: notes/triage.md
+    on_fail: fail
+    required: true
+  - id: coverage-assessed
+    desc: Actual/skipped templates and hosts, health and omissions accurately disclosed
+    verify: judge
+    evidence: notes/coverage.md
     on_fail: fail
     required: true
 ```
 
 ## Notes / pitfalls
-- **Triage is mandatory** — never report raw nuclei output; `triaged` fails hard (`on_fail: fail`).
-- Update templates **before** every scan, but **`-update-templates` can exit 0 yet download nothing** (rate-limited/offline mirror) — verify the count first and `git clone` the templates repo as a fallback.
-- **Vhost / host errors:** a redirect to a non-resolving vhost breaks DNS — resolve per AGENTS.md; use `-dr` + `-mhe 30` so the host isn't flagged permanently unresponsive and skipped.
-- A scan with no hits must still leave `nuclei.txt` ("no findings") so `exists` passes.
+- Never put markers into native JSONL or equate scanner severity with confirmed impact.
+- High host-error allowances hide degraded targets; report skips instead of scanning through failures.

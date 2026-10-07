@@ -9,8 +9,9 @@ description: >
 arguments: "target user[:password] [keyfile]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: access
 domain: host
 ---
@@ -21,14 +22,14 @@ Shared contract: see AGENTS.md.
 
 ## Goal
 Prove non-interactively whether one supplied SSH credential is valid on an authorized target and
-capture the outcome — on success `id`/`hostname` proof + read-only enum + user flag; a proven-*invalid* credential is also a complete run.
+capture raw `id`/`hostname` proof and only goal-relevant read-only context. A failed login is error.
 
 ## Steps
-1. Parse supplied credentials. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill ssh-foothold --target "$TARGET")"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Record the one-shot channel, not the password, in `notes/transport.txt`.
-2. Set `SSH_COMMON="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o NumberOfPasswordPrompts=1"`. Wrap either original key `timeout 30 ssh -i "$KEYFILE" -o BatchMode=yes $SSH_COMMON "$USER@$TARGET" 'id; hostname'` or password `timeout 30 sshpass -p "$PASS" ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no $SSH_COMMON "$USER@$TARGET" 'id; hostname'` with `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --`; redirect its output to `loot/ssh_login.txt`. On nonzero, record LOGIN-FAILED and enrich the error handback; no retry.
-3. **Result marker + proof.** If `loot/ssh_login.txt` shows `uid=`, write `LOGIN-OK $USER@$TARGET` to `notes/result.txt` and copy it to `loot/proof.txt`; else `LOGIN-FAILED $USER@$TARGET (auth rejected)`.
-4. **On success only:** wrap each timeout-bounded SSH enum/flag call with the same helper and target. `id; whoami; hostname; uname -a; sudo -n -l; ls -la ~` goes to `notes/enum.txt`; `cat ~/user.txt` (or `find / -maxdepth 4 -name user.txt`) goes to `loot/user_flag.txt`. No target changes.
-5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'transport-recorded=ok:notes/transport.txt' --item 'login-result=ok:notes/result.txt' --target-state unchanged --cleanup not-needed`; STATUS is complete on proven login, error on rejected/failed login. Keep secrets out of summaries.
+1. Parse ONE supplied credential, verified ssh/sshpass identity and endpoint/port. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill ssh-foothold --target "$TARGET" --profile single-credential --coverage-set 'One supplied credential and identity proof')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, 30-second login cap and <=60-second initial task; record channel/key-trust method, not secrets, in notes/transport.txt.
+2. Key example: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 30 --grace 5 -- ssh -i "$KEYFILE" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$RUN/notes/known_hosts" "$USER@$TARGET" 'id && hostname' > "$RUN/loot/ssh_login.txt"`. Prefer supplied pinned host keys; preserve trust on later calls. Password alternative uses `SSHPASS="$PASS"` on the helper process and `sshpass -e ssh`, with password auth only and `NumberOfPasswordPrompts=1`; same connection/trust/cap, no interactive prompt.
+3. Derive LOGIN-OK only from actual identity/hostname output and zero exit; copy raw proof to loot/proof.txt, never just the marker. Otherwise record LOGIN-FAILED with the actual auth/connection/tool reason and error handback, no retry or SSH-255 reclassification. Secrets stay private.
+4. After proved access and only within remaining allocation, one 30-second helper-wrapped read-only call for `uname -a; pwd; ls -la ~` is sufficient context. Read a known user.txt only for an HTB/CTF flag objective; no whole-filesystem search, mandatory flag or bundled `sudo -n -l` whose denial hides successful access.
+5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other credentials and broad host enumeration' --item 'scope-confirmed=ok:../../scope.json' --item 'transport-recorded=ok:notes/transport.txt' --item 'login-result=ok:notes/result.txt' --target-state unchanged --cleanup not-needed`; complete only the proved declared login task; missing proof is partial, failed command error. Return actual access refs to coordinator, never chain privesc.
 
 ## Modern tooling & alternatives
 A single credentialed login via `sshpass -p` (password) or `ssh -i <key> -o BatchMode=yes` (key) is the
@@ -51,20 +52,20 @@ checklist:
     on_fail: redo-part
     required: true
   - id: login-result
-    desc: Result marker written from the captured transcript so "ran, credential invalid" is distinguishable from "didn't run"
-    verify: contains:(LOGIN-OK|LOGIN-FAILED)
+    desc: Result matches actual command events and raw auth/connection/identity outcome
+    verify: judge
     evidence: notes/result.txt
     on_fail: redo-part
     required: true
   - id: foothold-proof
     desc: On a successful login, the id/hostname foothold proof is captured (absent on a rejected credential)
-    verify: contains:(uid=)
+    verify: judge
     evidence: loot/proof.txt
-    on_fail: redo-skill
+    on_fail: fail
     required: false
 ```
 
 ## Notes / pitfalls
-- **Single credential test, not brute-force** — one credential; for spraying use `hydra`. `NumberOfPasswordPrompts=1` makes a wrong password fail after one prompt (avoids lockout + the re-prompt loop an `expect` script causes).
-- **Always non-interactive** — `sshpass`/`BatchMode=yes`, `StrictHostKeyChecking=no`, `ConnectTimeout`, wrapping `timeout`; never a bare `ssh` shell or `expect`. A `timeout` stall is a tool failure, not a guardrail.
+- A single failed credential can affect lockout counters; no attempt budget or safety guarantee is inferred.
+- Preserve host-key verification and bounded noninteractive proof; no held shell, expect or hidden failures.
 - Rejected credentials leave LOGIN-FAILED and an error handback, never a retry. Read-only proof owes no cleanup; secrets stay private and are redacted by the reporter.

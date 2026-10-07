@@ -7,14 +7,17 @@ import fcntl
 import fnmatch
 import ipaddress
 import json
+import math
 import os
 import pathlib
 import re
+import selectors
 import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from contextlib import contextmanager
 from urllib.parse import urlsplit
 
@@ -22,6 +25,34 @@ from urllib.parse import urlsplit
 REPO = pathlib.Path(__file__).resolve().parent.parent
 EVENTS = ("run_start", "cmd_start", "cmd", "marker", "guardrail_stop", "run_end")
 BLOCKS = ("guardrail:permission-classifier", "guardrail:api-cyber-safeguard")
+STOP_REASONS = ("unknown", "completed", "native-budget", "health", "inconclusive",
+                "helper-timeout", "interrupted", "error")
+
+
+def positive_seconds(value):
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("duration must be positive and finite")
+    return seconds
+
+
+def grace_seconds(value):
+    seconds = positive_seconds(value)
+    if seconds > 30:
+        raise argparse.ArgumentTypeError("grace must not exceed 30 seconds")
+    return seconds
+
+
+def observed_units(value):
+    count = int(value)
+    if count < 0:
+        raise argparse.ArgumentTypeError("observed units must be nonnegative")
+    return count
+
+
+def coverage(profile="unspecified", declared=""):
+    return {"profile": profile, "declared": declared, "observed": None,
+            "omitted": [], "stop_reason": "unknown"}
 
 
 def utc():
@@ -228,6 +259,14 @@ def render(data):
     else:
         lines += ["## Target state", handback["target_state"],
                   "Cleanup: " + handback["cleanup"], *handback["artifacts"], ""]
+    extent = data.get("coverage")
+    lines += ["## Coverage"]
+    if extent:
+        lines += ["Profile: " + extent["profile"], "Declared set: " + extent["declared"],
+                  "Observed units: " + (str(extent["observed"]) if extent["observed"] is not None else "unknown"),
+                  "Stop reason: " + extent["stop_reason"], *["Omitted: " + item for item in extent["omitted"]], ""]
+    else:
+        lines += ["Unknown; no coverage declaration recorded.", ""]
     lines += ["## Findings"]
     for finding in data["findings"]:
         lines += ["", "### " + finding["title"], "Severity: " + finding["severity"],
@@ -250,6 +289,8 @@ def finalize(directory, data, status, summary, errors=(), **changes):
         raise ValueError("error runs require --error")
     if status == "complete" and data["handback"]["cleanup"] == "owed":
         raise ValueError("owed cleanup cannot be declared complete")
+    if status == "complete" and data.get("coverage", {}).get("stop_reason", "unknown") not in ("unknown", "completed"):
+        raise ValueError("incomplete coverage must remain partial or error")
     data["evidence"] = sorted(set(inventory(directory) + ["findings.md"]))
     append_event(directory, "run_end", status=status)
     write_json(directory / "run.json", data)
@@ -306,12 +347,71 @@ def init(args):
             "errors": [], "handback": {"completed": [], "target_state": "unknown",
             "cleanup": "unknown", "artifacts": [], "resolution": ["Resolve the failure before starting a new run."],
             "block": "", "request_id": ""}}
+    if args.profile or args.coverage_set:
+        data["coverage"] = coverage(slug(args.profile) if args.profile else "unspecified", args.coverage_set or "")
     atomic(directory / "run.log", "")
     write_json(directory / "run.json", data)
     atomic(directory / "findings.md", render(data))
     append_event(directory, "run_start")
     print(directory)
     return 0
+
+
+def hashcat_outcome(command, child_exit, transcript_path, offset, timeout):
+    if pathlib.Path(command[0]).name not in ("hashcat", "hashcat.bin") or "--status-json" not in command:
+        return None
+    excluded = {"--quiet", "--machine-readable", "--force", "--restore", "--benchmark", "--show", "--left",
+                "--keyspace", "--stdout", "--speed-only", "--progress-only", "--identify", "--self-test-disable",
+                "--brain-client", "--brain-server", "-I", "-b", "-q", "-h", "-V"}
+    if any(argument.partition("=")[0] in excluded for argument in command[1:]):
+        return None
+    runtime_values = []
+    modes = []
+    for index, argument in enumerate(command[1:], 1):
+        if argument == "--runtime" and index + 1 < len(command):
+            runtime_values.append(command[index + 1])
+        elif argument.startswith("--runtime="):
+            runtime_values.append(argument.partition("=")[2])
+        elif argument in ("-m", "--hash-type") and index + 1 < len(command):
+            modes.append(command[index + 1])
+    if len(modes) != 1 or not modes[0].isdigit() or len(runtime_values) != 1:
+        return None
+    if not runtime_values[0].isdigit() or not 0 < int(runtime_values[0]) < timeout:
+        return None
+    with transcript_path.open("rb") as raw:
+        raw.seek(offset)
+        header = raw.read(8192).decode("utf-8", errors="replace")
+        raw.seek(max(offset, raw.seek(0, os.SEEK_END) - 65536))
+        tail = raw.read().decode("utf-8", errors="replace")
+    if not re.search(r"^hashcat \(v6\.2\.6\) starting\s*$", header, re.MULTILINE):
+        return None
+    snapshot = None
+    for line in tail.splitlines():
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            value = json.loads(line)
+        except ValueError:
+            snapshot = None
+            continue
+        if isinstance(value, dict) and "status" in value:
+            snapshot = value
+    if not snapshot or type(snapshot.get("status")) is not int or not isinstance(snapshot.get("guess"), dict):
+        return None
+    progress = snapshot.get("progress")
+    recovered = snapshot.get("recovered_hashes")
+    for counts in (progress, recovered):
+        if (not isinstance(counts, list) or len(counts) != 2
+                or any(type(count) is not int or count < 0 for count in counts)
+                or counts[0] > counts[1]):
+            return None
+    if not isinstance(snapshot.get("session"), str) or recovered[1] == 0:
+        return None
+    if child_exit == 1 and snapshot["status"] == 5 and progress[1] > 0 and progress[0] == progress[1]:
+        return "exhausted"
+    if child_exit == 4 and snapshot["status"] == 11:
+        return "native-budget"
+    return None
 
 
 def run(args):
@@ -333,57 +433,143 @@ def run(args):
             print(reason, file=sys.stderr)
             return result
         metadata = {"executable": pathlib.Path(command[0]).name, "arguments": "[redacted]"}
-        append_event(directory, "cmd_start", command=metadata, label=args.label)
+        started = time.monotonic()
+        limits = {"timeout": args.timeout, "grace": args.grace, "policy": args.outcome_policy}
+        append_event(directory, "cmd_start", command=metadata, label=args.label, execution=limits)
         process = None
-        interrupted = False
+        interrupted = 0
+        timed_out = False
+        child_exit = None
+        console_descriptor = None
+        console_blocking = None
         previous = {}
 
         def terminate(signum, frame):
             nonlocal interrupted
             interrupted = signum
-            if process:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+
+        def signal_group(signum):
+            try:
+                os.killpg(process.pid, signum)
+                return True
+            except ProcessLookupError:
+                return False
 
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, terminate)
         try:
             with inside(directory / "run.log", root()).open("ab") as transcript:
+                log_offset = transcript.tell()
                 try:
                     process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                                stderr=subprocess.STDOUT, start_new_session=True)
-                    if interrupted:
+                    os.set_blocking(process.stdout.fileno(), False)
+                    try:
+                        console_descriptor = sys.stdout.fileno()
+                        console_blocking = os.get_blocking(console_descriptor)
+                        os.set_blocking(console_descriptor, False)
+                    except (OSError, ValueError):
+                        console_descriptor = None
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(process.stdout, selectors.EVENT_READ)
+                        output_open = True
+                        stopping_at = None
+                        while True:
+                            now = time.monotonic()
+                            child_exit = process.poll()
+                            if stopping_at is None and (interrupted or now >= started + args.timeout):
+                                timed_out = not interrupted
+                                stopping_at = now + args.grace
+                                signal_group(signal.SIGTERM)
+                            if child_exit is not None and not output_open:
+                                if stopping_at is None or not signal_group(0):
+                                    break
+                            if stopping_at is not None and now >= stopping_at:
+                                signal_group(signal.SIGKILL)
+                                break
+                            boundary = stopping_at if stopping_at is not None else started + args.timeout
+                            for ready, mask in selector.select(min(0.1, max(0, boundary - now))):
+                                try:
+                                    chunk = os.read(ready.fd, 65536)
+                                except BlockingIOError:
+                                    continue
+                                if not chunk:
+                                    selector.unregister(process.stdout)
+                                    output_open = False
+                                    continue
+                                transcript.write(chunk)
+                                transcript.flush()
+                                os.fsync(transcript.fileno())
+                                if console_descriptor is not None:
+                                    try:
+                                        os.write(console_descriptor, chunk)
+                                    except OSError:
+                                        pass
                         try:
-                            os.killpg(process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                    while True:
-                        chunk = process.stdout.read1(65536)
-                        if not chunk:
-                            break
-                        transcript.write(chunk)
+                            child_exit = process.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            signal_group(signal.SIGKILL)
+                            child_exit = process.poll()
+                        drain_until = time.monotonic() + 1
+                        while output_open and time.monotonic() < drain_until:
+                            try:
+                                chunk = os.read(process.stdout.fileno(), 65536)
+                            except BlockingIOError:
+                                break
+                            if not chunk:
+                                break
+                            transcript.write(chunk)
                         transcript.flush()
                         os.fsync(transcript.fileno())
+                    tool_exit = 128 - child_exit if child_exit is not None and child_exit < 0 else child_exit
+                    exit_code = 124 if timed_out else (128 + interrupted if interrupted else tool_exit)
+                    if exit_code is None:
+                        exit_code = 1
+                except OSError as error:
+                    transcript.write(("Command launch or capture failed: " + str(error) + "\n").encode())
+                    transcript.flush()
+                    os.fsync(transcript.fileno())
+                    if process:
                         try:
-                            sys.stdout.buffer.write(chunk)
-                            sys.stdout.buffer.flush()
-                        except BrokenPipeError:
+                            signal_group(signal.SIGKILL)
+                            child_exit = process.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            child_exit = process.poll()
+                        except ProcessLookupError:
                             pass
-                    exit_code = process.wait()
-                    exit_code = 128 - exit_code if exit_code < 0 else exit_code
-                    if interrupted:
-                        exit_code = 128 + interrupted
-                except OSError:
-                    exit_code = 127
+                    tool_exit = 127
+                    exit_code = 124 if timed_out else (128 + interrupted if interrupted else 127)
         finally:
+            if process and process.stdout:
+                process.stdout.close()
+            if console_descriptor is not None and console_blocking is not None:
+                os.set_blocking(console_descriptor, console_blocking)
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
-        append_event(directory, "cmd", command=metadata, label=args.label, exit=exit_code)
+        outcome = "success" if exit_code == 0 else "error"
+        if not timed_out and not interrupted and exit_code in (1, 4) and args.outcome_policy == "hashcat-v6.2.6":
+            classified = hashcat_outcome(command, child_exit, directory / "run.log", log_offset, args.timeout)
+            if classified:
+                outcome = classified
+                exit_code = 0
+                if classified == "native-budget":
+                    data.setdefault("coverage", coverage())["stop_reason"] = "native-budget"
+        execution = {**limits, "duration": round(time.monotonic() - started, 6),
+                     "child_exit": child_exit, "helper_exit": exit_code,
+                     "outcome": outcome,
+                     "stop": "timeout" if timed_out else ("interrupted" if interrupted else "finished")}
+        append_event(directory, "cmd", command=metadata, label=args.label,
+                     exit=tool_exit if tool_exit is not None else exit_code, execution=execution)
         if exit_code or interrupted:
-            reason = "Command interrupted" if interrupted else "Command failed with exit " + str(exit_code)
+            reason = ("Command interrupted" if interrupted else
+                      "Command exceeded helper deadline" if timed_out else
+                      "Command failed with exit " + str(exit_code))
+            if "coverage" in data:
+                data["coverage"]["stop_reason"] = "interrupted" if interrupted else ("helper-timeout" if timed_out else "error")
             finalize(directory, data, "error", reason, [reason])
+        elif outcome == "native-budget":
+            write_json(directory / "run.json", data)
+            atomic(directory / "findings.md", render(data))
         return exit_code
 
 
@@ -411,6 +597,20 @@ def finish(args):
     directory, data = read_run(args.run_dir)
     with lock(directory):
         directory, data = read_run(directory)
+        if args.profile or args.coverage_set is not None or args.observed is not None or args.omitted or args.stop_reason:
+            extent = data.setdefault("coverage", coverage())
+            if args.profile:
+                extent["profile"] = slug(args.profile)
+            if args.coverage_set is not None:
+                extent["declared"] = args.coverage_set
+            if args.observed is not None:
+                extent["observed"] = args.observed
+            extent["omitted"].extend(args.omitted)
+            if args.stop_reason:
+                if (extent["stop_reason"] in ("native-budget", "helper-timeout", "interrupted", "error")
+                        and args.stop_reason not in (extent["stop_reason"], "error")):
+                    raise ValueError("recorded execution stop cannot be relabeled")
+                extent["stop_reason"] = args.stop_reason
         for item in args.item:
             name, value = item.split("=", 1)
             outcome, evidence = value.split(":", 1)
@@ -487,12 +687,17 @@ def parser():
     start.add_argument("--skill", required=True)
     start.add_argument("--target")
     start.add_argument("--run-dir")
+    start.add_argument("--profile")
+    start.add_argument("--coverage-set")
     start.set_defaults(handler=init)
     execute = commands.add_parser("run")
     execute.add_argument("--run-dir", required=True)
     execute.add_argument("--label", default="")
     execute.add_argument("--target", action="append")
     execute.add_argument("--targets-file")
+    execute.add_argument("--timeout", type=positive_seconds, default=300.0)
+    execute.add_argument("--grace", type=grace_seconds, default=5.0)
+    execute.add_argument("--outcome-policy", choices=("strict", "hashcat-v6.2.6"), default="strict")
     execute.add_argument("command", nargs=argparse.REMAINDER)
     execute.set_defaults(handler=run)
     mark = commands.add_parser("event")
@@ -512,6 +717,11 @@ def parser():
         end.add_argument("--" + field, action="append", default=[])
     end.add_argument("--target-state", choices=("unknown", "unchanged", "changed"), default="unknown")
     end.add_argument("--cleanup", choices=("unknown", "not-needed", "verified", "owed"), default="unknown")
+    end.add_argument("--profile")
+    end.add_argument("--coverage-set")
+    end.add_argument("--observed", type=observed_units)
+    end.add_argument("--omitted", action="append", default=[])
+    end.add_argument("--stop-reason", choices=STOP_REASONS)
     end.set_defaults(handler=finish)
     export = commands.add_parser("archive")
     export.add_argument("--engagement", required=True)

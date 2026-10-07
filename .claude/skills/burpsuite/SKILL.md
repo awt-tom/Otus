@@ -9,8 +9,9 @@ description: >
 arguments: "target_or_urls [extension]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: web
 domain: web
 ---
@@ -24,11 +25,11 @@ Manually intercept, inspect, modify, and replay HTTP(S) against an in-scope web 
 attack surface and driving Repeater/Intruder exploitation (IDOR/authz/logic, injection leads).
 
 ## Steps
-1. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill burpsuite)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. For lists use `--targets-file "$HOSTS"`. `mkdir -p "$RUN/requests"`; restrict Burp Target/Proxy/Logger to checked hosts before browsing.
-2. **Proxy + map.** Route the browser through Burp, authenticate, and browse/crawl so **Target → Site map** populates; capture mapped endpoints/parameters into `notes/sitemap.md` (export items or paste the host tree) so "mapped" is evidenced.
-3. **Repeater — targeted testing.** Send interesting requests to Repeater; test IDOR / broken authz / logic by swapping IDs, tokens, roles and tampering params. Save notable raw request/response into `requests/` (one file per case). Hand injectable params to `sqlmap` (save item → `req.txt`).
-4. **Intruder + helpers.** Use Intruder for targeted fuzzing (sniper/cluster-bomb), and Decoder/Comparer/Sequencer as needed. Useful extensions: **Autorize** (authz), **Param Miner** (hidden params), **Logger++**.
-5. Export requests/project/report and record each manual step with `python3 -I scripts/otus-log.py event --run-dir "$RUN" --event marker --note "$STEP"`. CLI companions use `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" -- CMD`. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'app-mapped=ok:notes/sitemap.md' --item 'requests-tested=ok:findings.md'`; add verified `--finding` entries referencing saved cases and actual cleanup fields. Use no-findings summary if none.
+1. Choose ONE mapping/replay/export hypothesis and a 300-second task allocation. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill burpsuite --profile focused-manual --coverage-set 'Selected manual hypothesis and cases')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; batches use `--targets-file "$HOSTS"`; nonzero STOP. Write notes/task.md; restrict Target/Proxy/Logger to checked hosts before browsing.
+2. Verify GUI capability before promising work. No usable GUI -> partial/manual handback, no simulated browsing or wait for interaction. Otherwise use existing context to inspect only relevant pages/parameters; save the actual host tree/cases in evidence/ and notes/sitemap.md with coverage gaps.
+3. Repeater tests only the selected authz/logic/injection cases; save real raw request/response files, compare to controls and assess minimum impact. No automatic broad crawler, Intruder cluster-bomb or hidden-parameter spray. A selected low-load Intruder case needs its own finite hypothesis.
+4. Export actual cases/project sections and record performed manual work with `python3 -I scripts/otus-log.py event --run-dir "$RUN" --event marker --note "$STEP"`. Markers alone do not prove tests. CLI companions: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 120 -- <verified one-shot argv>` within remaining allocation; no long-lived GUI launch/shell.
+5. Record case refs, outcome, omissions and any proposed downstream skill in notes/assessment.md. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Unselected pages and active scanning' --item 'scope-confirmed=ok:../../scope.json' --item 'app-mapped=ok:notes/sitemap.md' --item 'requests-tested=ok:notes/assessment.md'`; only claim actual work/findings, with state/cleanup fields. No findings in tested cases can be complete; unavailable/unfinished GUI work stays partial. Return to coordinator, do not launch sqlmap yourself.
 
 ## Modern tooling & alternatives
 Burp is standard — **Pro** for active scan/extensions, **Community** for manual Repeater/Intruder
@@ -45,26 +46,26 @@ checklist:
     on_fail: fail
     required: true
   - id: app-mapped
-    desc: App proxied/crawled; mapped endpoints captured (not assumed)
-    verify: nonempty
+    desc: Relevant observed endpoints/case exports or actual GUI limitation disclosed
+    verify: judge
     evidence: notes/sitemap.md
     on_fail: redo-part
     required: true
   - id: requests-tested
-    desc: Interesting requests tested via Repeater/Intruder; run marker written
-    verify: nonempty
-    evidence: findings.md
+    desc: Real exported cases and events support the selected tests, result and omissions
+    verify: judge
+    evidence: notes/assessment.md
     on_fail: redo-skill
     required: true
   - id: evidence-exported
-    desc: Notable request/response cases saved into the run directory
-    verify: exists
-    evidence: requests
+    desc: Actual request/response files substantiate any claimed impact
+    verify: judge
+    evidence: notes/assessment.md
     on_fail: redo-part
     required: false
 ```
 
 ## Notes / pitfalls
 - **Scope first.** Setting Burp's Target scope to in-scope hosts only (and filtering Proxy/Logger) is mandatory before browsing — otherwise you capture/attack out-of-scope traffic; `scope-confirmed` fails hard.
-- Hand injectable parameters to `sqlmap` (save item → `req.txt`), not hand-brute-forced; Community Edition throttles Intruder and has no active scan, so plan manual/targeted fuzzing.
+- Return selected captured requests as proposals; Community Edition lacks active scan and throttles Intruder.
 - A no-hit run still finishes with `no findings recorded`; findings.md is rendered by the helper.

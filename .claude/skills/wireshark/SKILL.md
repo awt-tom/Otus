@@ -8,8 +8,9 @@ description: >
 arguments: "pcap_file [display_filter]"
 model: inherit
 effort: medium
-context: inline
-agent:
+context: fork
+agent: vuln-hunter
+background: false
 category: re-forensics
 domain: forensics
 ---
@@ -23,11 +24,11 @@ Extract the secrets/flags/artifacts hidden in a pcap — reconstruct conversatio
 files, decode protocols — capturing the recovered data and the filters used for the report.
 
 ## Steps
-1. Offline capture: `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill wireshark)"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"`; nonzero STOP. Empty captures finalize error. `mkdir -p "$RUN/objects"`; `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- tshark -r "$PCAP" -q -z io,phs > "$RUN/notes/protocols.txt"`.
-2. **Filter:** `python3 -I scripts/otus-log.py run --run-dir "$RUN" -- tshark -r "$PCAP" -Y "${2:-http}" -T fields -e frame.number -e ip.src -e http.request.full_uri` (or original `-T json`).
-3. **Follow streams.** Reconstruct a conversation in order with `-z follow,tcp,ascii,<stream>` to read creds/commands/exfil; save notable streams under `notes/`.
-4. **Carve transferred files.** Export objects into the run dir (`--export-objects help` lists protocols): `tshark -r "$PCAP" --export-objects "http,$RUN/objects"` (also `smb`, `tftp`, `imf`, …).
-5. Follow/export commands use the same helper wrapper; secrets go to `loot/`, filters/decisions to `notes/`, and findings refer to evidence without secret values. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --item 'scope-confirmed=ok:../../scope.json' --item 'pcap-triaged=ok:notes/protocols.txt' --item 'artifacts-extracted=ok:findings.md' --item 'results-recorded=ok:findings.md' --target-state unchanged --cleanup not-needed`; add verified artifact findings or `no artifacts extracted`. Hand off to binwalk/stego/crypto.
+1. Offline capture: `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill wireshark --profile selected-capture --coverage-set 'Sampled packet overview and at most three relevant streams/artifacts')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"`; nonzero STOP. Verify nonempty PCAP/provenance and installed tshark/help. Write notes/task.md with hypothesis, actual packet/filter selection and <=120-second initial task; never modify the original capture.
+2. Initial overview: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --timeout 60 --grace 5 -- tshark -n -r "$PCAP" -c 10000 -q -z io,phs > "$RUN/notes/protocols.txt"`. This samples at most 10000 packets; record sample/full-input difference. `-n` disables external name resolution; no live capture/network action.
+3. Select a context-supported FILTER, not always HTTP. Use the checked helper with <=60-second cap and remaining allocation for `tshark -n -r "$PCAP" -Y "$FILTER" -T fields -e frame.number -e tcp.stream -e ip.src`, saving actual packet/stream refs. Select <=3 relevant streams/artifacts, not blanket follow/export.
+4. Follow a selected stream with `-q -z "follow,tcp,ascii,$STREAM"` under the same bounded wrapper, writing private loot/ output. For selective object export first save the selected packets to evidence/selected.pcap with `-Y "$FILTER" -w`, then run the supported `--export-objects "http,$RUN/loot/objects"` on that selected capture, never presume an export-object job is restricted by display filtering alone. Record native object/files and exact filters in notes/assessment.md.
+5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Unselected packets, streams and object types' --item 'scope-confirmed=ok:../../scope.json' --item 'pcap-triaged=ok:notes/protocols.txt' --item 'artifacts-extracted=ok:notes/assessment.md' --item 'results-recorded=ok:notes/assessment.md' --target-state unchanged --cleanup not-needed`; finished declared sample can be complete with no artifacts, native unfinished/inconclusive partial, helper failure error. Add only artifact-backed secret-free findings; return candidate files to coordinator, no chained skill.
 
 ## Modern tooling & alternatives
 Wireshark GUI for interactive exploration; `tshark` for scriptable/headless extraction (preferred
@@ -49,21 +50,21 @@ checklist:
     on_fail: redo-part
     required: true
   - id: artifacts-extracted
-    desc: Streams followed / objects carved; findings recorded (or documented "none")
-    verify: nonempty
-    evidence: findings.md
-    on_fail: redo-skill
+    desc: Actual selected-stream/object evidence supports claims, or justified skips disclosed
+    verify: judge
+    evidence: notes/assessment.md
+    on_fail: fail
     required: true
   - id: results-recorded
-    desc: Run marker written (even when nothing extracted)
-    verify: nonempty
-    evidence: findings.md
-    on_fail: redo-skill
+    desc: Sample/filter/stream coverage and actual artifacts or unknown counts accurately assessed
+    verify: judge
+    evidence: notes/assessment.md
+    on_fail: fail
     required: true
 ```
 
 ## Notes / pitfalls
 - **Prefer `tshark`** for automation inside the skill; reserve the GUI for exploratory follow-stream work.
-- **Huge pcaps → filter first** (`-Y` / capture filter) or extraction crawls; `--export-objects help` lists supported protocols (http, smb, tftp, imf, …).
+- Display filters restrict selected output, not necessarily decoding cost; sample/subset huge captures explicitly.
 - Follow TCP/UDP streams to read creds/commands in order — a single-packet view misses the exchange.
 - No artifacts still finishes with that summary; findings.md is generated.
