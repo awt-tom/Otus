@@ -160,10 +160,13 @@ def load_scope(engagement):
     if not isinstance(data, dict):
         raise ValueError("scope must be a JSON object")
     if (data.get("schema") != "otus/scope@1" or data.get("engagement") != engagement
-            or not isinstance(data.get("authorized_by"), str) or not data["authorized_by"].strip()
-            or not isinstance(data.get("notes"), str)
-            or not isinstance(data.get("targets"), list) or not data["targets"]):
+            or any(field in data and not isinstance(data[field], str) for field in ("authorized_by", "notes"))
+            or not isinstance(data.get("targets"), list)
+            or data.get("mode", "network") not in ("network", "offline")):
         raise ValueError("invalid scope schema")
+    if (data.get("mode", "network") == "network" and not data["targets"]
+            or data.get("mode") == "offline" and data["targets"]):
+        raise ValueError("network scope needs targets; offline scope must have no network targets")
     datetime.date.fromisoformat(data["date"])
     for target in data["targets"]:
         if not isinstance(target, str) or target != pattern(target):
@@ -175,7 +178,9 @@ def scope_result(engagement, targets):
     try:
         scope = load_scope(engagement)
     except (OSError, ValueError, KeyError, TypeError):
-        return 3, "scope.json missing or invalid; ask the user for explicit authorization"
+        return 3, "scope.json missing or invalid; coordinator must bind the supplied task scope"
+    if scope.get("mode") == "offline" and targets:
+        return 2, "offline scope cannot be used for network targets; stop and clarify scope"
     for target in targets:
         try:
             candidate = host(target)
@@ -191,7 +196,7 @@ def scope_result(engagement, targets):
                 if matched:
                     break
             if not matched:
-                return 2, "target is outside the authorized allowlist; stop and ask the user"
+                return 2, "target is outside the bound task scope; stop and clarify scope"
         except ValueError:
             return 2, "invalid target; stop and ask the user"
     return 0, "scope confirmed"
@@ -299,17 +304,25 @@ def finalize(directory, data, status, summary, errors=(), **changes):
 
 def scope_init(args):
     directory = engagement_dir(args.engagement)
-    if not args.authorized_by.strip() or not args.confirmed:
-        raise ValueError("--confirmed and explicit user-provided --authorized-by are required")
-    targets = [pattern(value) for value in args.target]
+    targets = sorted({pattern(value) for value in args.target})
+    if (args.offline and targets) or (not args.offline and not targets):
+        raise ValueError("provide --target for network scope or --offline without targets")
+    mode = "offline" if args.offline else "network"
     private_dir(directory)
     with lock(directory):
         path = inside(directory / "scope.json", root())
         if path.exists() and not args.force:
-            raise ValueError("scope.json already exists; never replace authorization implicitly")
-        write_json(path, {"schema": "otus/scope@1", "engagement": args.engagement,
-                         "authorized_by": args.authorized_by, "date": utc()[:10],
-                         "targets": targets, "notes": args.note})
+            previous = load_scope(args.engagement)
+            if sorted(set(previous["targets"])) == targets and previous.get("mode", "network") == mode:
+                return 0
+            raise ValueError("scope.json already binds different targets; never replace task scope implicitly")
+        data = {"schema": "otus/scope@1", "engagement": args.engagement,
+                "date": utc()[:10], "targets": targets, "notes": args.note}
+        if args.authorized_by is not None:
+            data["authorized_by"] = args.authorized_by
+        if args.offline:
+            data["mode"] = mode
+        write_json(path, data)
     return 0
 
 
@@ -670,10 +683,11 @@ def parser():
     commands = result.add_subparsers(dest="subcommand", required=True)
     scope = commands.add_parser("scope-init")
     scope.add_argument("--engagement", required=True)
-    scope.add_argument("--authorized-by", required=True)
-    scope.add_argument("--target", action="append", required=True)
+    scope.add_argument("--authorized-by", help="optional legacy provenance; not an execution prerequisite")
+    scope.add_argument("--target", action="append", default=[])
+    scope.add_argument("--offline", action="store_true", help="bind a local-only task with no network targets")
     scope.add_argument("--note", default="")
-    scope.add_argument("--confirmed", action="store_true")
+    scope.add_argument("--confirmed", action="store_true", help="accepted for legacy CLI compatibility")
     scope.add_argument("--force", action="store_true")
     scope.set_defaults(handler=scope_init)
     check = commands.add_parser("scope-check")

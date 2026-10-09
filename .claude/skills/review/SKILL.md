@@ -49,7 +49,7 @@ Assigned review.json plus `PASS | FAILED-RECOVERED | FAILED | NON-COMPLIANT`; st
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Source engagement gate checked read-only, report exemption correctly applied
+    desc: Inherited task binding checked read-only, report exemption correctly applied
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

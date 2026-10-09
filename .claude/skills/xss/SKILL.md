@@ -38,7 +38,7 @@ Invader) for manual reflected/stored/DOM work. Legacy `XSStrike` is largely supe
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and every endpoint/callback checked
+    desc: Inherited task scope and every endpoint/callback checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail
@@ -65,6 +65,6 @@ checklist:
 
 ## Notes / pitfalls
 - **Context is everything** — the same payload that fires in an HTML body is inert in a JS string or attribute; analyse the sink before picking a payload.
-- **Benign PoC only.** `alert(document.domain)` / authorized callback — never steal real users' cookies, deface, or auto-exfiltrate; `confirmed-poc` fails hard (`on_fail: fail`).
+- **Benign PoC only.** `alert(document.domain)` / in-scope callback — never steal real users' cookies, deface, or auto-exfiltrate; `confirmed-poc` fails hard (`on_fail: fail`).
 - DOM XSS needs source→sink tracing in the browser/Burp DOM Invader, not just server reflection. Keep payloads in RAG, not inline, so they stay current.
 - No proof is required for a truthful scoped negative; every claimed execution requires real evidence.

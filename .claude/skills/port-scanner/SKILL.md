@@ -40,7 +40,7 @@ Nmap is the baseline; faster scanners are conditional alternatives, not compulso
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and scan target checked
+    desc: Inherited task scope and scan target checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

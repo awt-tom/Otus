@@ -20,12 +20,12 @@ domain: web
 Shared contract: see AGENTS.md.
 
 ## Goal
-Test selected server-side fetch candidates with minimal proof to already authorized destinations.
+Test selected server-side fetch candidates with minimal proof to already bound destinations.
 Do not expand a fetch confirmation into a private-network or metadata sweep.
 
 ## Steps
 1. Select <=3 URL-fetching candidates and a 120-second initial task. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill ssrf --profile selected-fetch --coverage-set 'At most three fetch candidates')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --target "$DESTINATION" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, actual application/destination, input/version and proof criterion.
-2. Reuse known parameters and test a minimal callback/banner to an already authorized destination. Record candidates in notes/candidates.md. Use existing bounded OOB facilities, not a held listener; lack of callback visibility is inconclusive, not absence of SSRF.
+2. Reuse known parameters and test a minimal callback/banner to an already bound destination. Record candidates in notes/candidates.md. Use existing bounded OOB facilities, not a held listener; lack of callback visibility is inconclusive, not absence of SSRF.
 3. Every induced endpoint/redirect needs a fresh gate, including private/metadata IPs. No default metadata/private-range sweep or application-filter bypass ladder; a further test requires a specific lead/new finite allocation. Platform refusals are never bypassed.
 4. CLI: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --target "$DESTINATION" --timeout 120 -- <verified one-shot request argv>`; native request timeouts fit remaining allocation. Save actual requests/responses and OOB logs; manual actions need exports/marker events. Record proof or explicit no-confirmation/untested cases in evidence/verification.md; no full credentials or destructive pivot.
 5. Complete only selected observed tests; native budget/missing OOB/inconclusive -> partial, hard failure -> error and stop. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other parameters, destinations and filter tests' --item 'scope-confirmed=ok:../../scope.json' --item 'params-identified=ok:notes/candidates.md' --item 'tested=ok:events.jsonl' --item 'confirmed-impact=ok:evidence/verification.md'`; add only real findings and actual state/cleanup fields. Return evidence to coordinator.
@@ -39,7 +39,7 @@ covers the manual/bypass reasoning those miss.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization, application, and induced destinations checked
+    desc: Inherited task scope, application, and induced destinations checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

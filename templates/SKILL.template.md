@@ -21,7 +21,7 @@ Shared contract: see AGENTS.md.
 What this selected bounded task proves, for which goal, and what it cannot establish. 1-2 sentences.
 
 ## Steps
-1. Select the cheapest discriminating test from checked inputs. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill <tool> --profile "$PROFILE" --coverage-set "$COVERAGE")"`.
+1. Inherit the parent-bound task scope; select the cheapest discriminating test from checked inputs. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill <tool> --profile "$PROFILE" --coverage-set "$COVERAGE")"`.
   `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Use `--targets-file "$HOSTS"` for batches; offline work omits target options.
 2. Write notes/task.md with hypothesis, version/inputs, profile, finite total/command budget, useful-progress criterion, escalation trigger and stop conditions. Verify identity/help before contact; choose a native budget below the helper cap where supported.
 3. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 60 --grace 5 -- <exact verified bounded argv>`; replace 60 with the justified finite cap. Offline work omits target options; GUI work saves real exports and `event --event marker`, not invented commands.
@@ -36,7 +36,7 @@ behaviour.
 ```yaml
 checklist:
   - id: scope-confirmed            # always first; references the inherited engagement scope
-    desc: Explicit engagement authorization and applicable endpoints checked
+    desc: Inherited task scope and applicable endpoints checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

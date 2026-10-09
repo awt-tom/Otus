@@ -39,7 +39,7 @@ is superseded. A provider API-keys config unlocks more passive sources (keep key
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and apex target checked
+    desc: Inherited task scope and apex target checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

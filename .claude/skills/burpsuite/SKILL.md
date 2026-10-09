@@ -40,7 +40,7 @@ scanning use `nuclei`; for content discovery `ffuf` — Burp is the manual hub t
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization, endpoints checked, and Burp scope restricted
+    desc: Inherited task scope, endpoints checked, and Burp scope restricted
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

@@ -39,7 +39,7 @@ BloodHound **CE** is current — match the collector to the CE ingest version. C
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and all collection hosts checked
+    desc: Inherited task scope and all collection hosts checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

@@ -39,7 +39,7 @@ URLs and truthful processed/unprocessed coverage, not default-page or dotfile-40
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and every contacted host/vhost checked
+    desc: Inherited task scope and every contacted host/vhost checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

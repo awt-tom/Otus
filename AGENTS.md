@@ -9,19 +9,23 @@ edit the contract here, never in the generated copies.
 Every rule below is stated **once**. A skill body references it with a single line —
 `Shared contract: see AGENTS.md` — and never restates it.
 
-## Authorization & scope gate (hard)
+## Task scope gate (hard)
 All work is lab/authorized only — in-scope bug-bounty programs, CTF/HTB labs, or systems you own.
-Confirm the target is in scope **once per engagement**, at the very start. Record ONLY the user's
-explicit authorization (who + targets) with `python3 -I scripts/otus-log.py scope-init --engagement
-"$ENGAGEMENT" --authorized-by "$WHO" --target "$TARGET" --confirmed`. Repeat `--target` as needed.
-The agent NEVER invents targets or authorization, or writes scope to pass its own gate. `--confirmed`
-asserts a real user confirmation, not agent approval; the file is a record, not proof of identity.
-`--force` requires explicit user approval of the replacement allowlist. Every skill run **inherits** that confirmation —
-do **not** re-confirm scope per run or per prompt. If scope is unclear, STOP and ask — never scan or
-exploit an unconfirmed target. After that one confirmation, proceed autonomously through the planned
-in-scope steps and the normal chain — report progress, but do **not** pause to ask "should I
-continue?" between benign in-scope steps. Only an actual guardrail refusal, a genuine new scope
-question, or a hard tool failure halts a run.
+The parent binds the supplied task scope **once per engagement**, before delegating active work:
+`python3 -I scripts/otus-log.py scope-init --engagement "$ENGAGEMENT" --target "$TARGET"`.
+Repeat `--target` for supplied hosts/globs/CIDRs. No authorization statement, authorizer record or
+`--confirmed` flag is required; scope records task boundaries, not proof of authorization.
+Use the supplied engagement slug, or create a short target/task-derived slug with actual UTC once
+and retain it for related tasks. Purely local artifact work uses explicit `scope-init --engagement
+"$ENGAGEMENT" --offline`, never an invented network target. Read-only setup checks need no record.
+Identical normalized bindings are idempotent and preserve existing scope bytes. Different bindings
+fail; `--force` requires explicit user approval of the replacement scope. Legacy authorization
+fields/flags remain optional provenance, never invented or an execution prerequisite.
+Workers inherit and validate scope; they never initialize, replace or expand it from their own
+requested endpoints. If actual target scope is unclear, STOP and ask. Otherwise proceed through
+planned in-scope steps autonomously; report progress without authorization dialogs or "should I
+continue?" pauses. Only an actual guardrail refusal, genuine scope question or hard tool failure
+halts a run. Removing framework authorization metadata never removes platform safeguards.
 
 ## Engagement workflow
 Choose work from evidence and the engagement goal, not a compulsory tool chain. HTB/CTF goals are
@@ -44,7 +48,8 @@ The parent coordinator alone delegates. Invoke the exact named worker with ONE s
 profile, engagement, evidence root, checked inputs, finite allocation, hypothesis and useful-progress
 criterion. Workers Read the selected runbook and execute it in their existing context; never invoke
 Skill/Agent to fork again, chain other skills, or start their own reviewers. Direct skill invocation
-uses its owning `agent` with `context: fork`; runtimes without agents execute the selected skill inline.
+uses its owning `agent` with `context: fork` where supported; other supported runtimes route through
+the parent to that same named owner. Missing delegation support fails setup, not an inline fallback.
 Never preload every runbook. Workers return actual run directories, terminal status, coverage/stop
 reason, evidence refs, state/cleanup and a proposed next step; no secrets or raw dumps.
 
@@ -54,8 +59,9 @@ UTC timestamp; independently inspect its assigned `review.json` before using res
 error/refusal. Setup checks are offline/read-only and are not skill runs or invented engagement evidence.
 
 Before an engagement, verify installed runtime/version, discovery diagnostics, registered role names,
-parent delegation tool, invocation controls and resolved worker permissions. Native `.claude/agents/`
-support is a version prerequisite, not assumed. Missing roles/tools fail setup; no generic fallback or
+parent delegation tool, invocation controls and resolved worker permissions. Native or generated
+named-role registration must be supported by that runtime/version, not assumed. Missing roles/tools
+fail setup; no generic fallback or
 fabricated launch. Reviewer has no shell. Reporter local encode/concat/measure commands require actual
 runtime-enforced permissions; `Bash(pattern)` strings/prose alone do not prove a locked shell. If the
 harness resolves them to broad execution or cannot enforce them, stop report assembly and disclose the
@@ -67,7 +73,7 @@ The coordinator exclusively owns private `<root>/<engagement>/notes/progress.md`
 updates. Record objective/mode, active work-period UTC start, known services/access (no secrets),
 evidence refs, tested/rejected hypotheses, next task, omissions and checkpoint decisions. Read it on
 resume; explicitly declare a new work period rather than silently resetting time for every worker.
-Standalone skills retain this context in their run's notes. Authorization remains in scope.json only.
+Standalone skills retain this context in their run's notes. Task scope remains in scope.json only.
 
 Before every task write `notes/task.md`: hypothesis, cheapest discriminating check, input/tool version,
 selected profile/set, finite command/task budget, useful-progress criterion, escalation trigger and
@@ -150,18 +156,21 @@ private directories/files, fsync, per-run locks, and atomic JSON replacement; di
 or teardown can still interrupt a write. No helper can promise a final record after sudden destruction.
 
 ## Logging lifecycle and scope checks
-Set `ENGAGEMENT` from the user, and `TARGET`/`HOSTS` from the skill inputs. First create a local
+Inherit `ENGAGEMENT` and parent-bound scope, and set `TARGET`/`HOSTS` from checked skill inputs.
+First create a local
 partial record with `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill NAME)"`.
 Then call `scope-check --engagement "$ENGAGEMENT" --run-dir "$RUN"` **before any active action**:
 use `--target "$TARGET"` for each contacted endpoint, or `--targets-file "$HOSTS"` for EVERY entry
 of a plain host/URL list. URLs normalize to hosts; DNS matches are case-insensitive, IPs canonical,
 allowlists accept exact hosts, `*.example.test` globs, or CIDRs. Exit 2 means invalid/unmatched target;
-exit 3 means missing/invalid authorization. Either stops the run and records an error, not a guardrail.
+exit 3 means missing/invalid task scope, never missing authorizer metadata. Either stops the run and
+records an error, not a guardrail.
 Initializing a denied run creates no scope or target contact. Never pass an unchecked list or follow
 an unchecked redirect. If scope is ambiguous or list contents are not plain hosts/URLs, STOP and ask.
 
 Offline artifact work (including hashcat) and read-only review check engagement scope only; remote
-pwntools and any other network action always check the actual endpoint. Reporter is exempt because
+pwntools and any other network action always check the actual endpoint. Explicit offline bindings
+have no network targets and cannot pass an endpoint check. Reporter is exempt because
 it never contacts a target. Scope is rechecked by every helper `run`; pass the applicable `--target`
 or `--targets-file` each time. A command that can discover/change endpoints needs a fresh check before
 contacting them; helper checks do not sandbox a tool's internal networking.
@@ -222,10 +231,14 @@ records stays unknown; never migrate historical records. Complete describes the 
 exhaustive coverage or the engagement goal. Early/native-budget/inconclusive stops remain terminal
 partial, hard failures remain error. Review verifies these declarations against actual artifacts.
 
-**scope.json — authorization record**
+**scope.json — task binding**
 ```json
-{"schema":"otus/scope@1","engagement":"acme-htb","authorized_by":"tom","date":"2026-10-06","targets":["10.10.11.42","*.acme.htb"],"notes":"Explicit user confirmation"}
+{"schema":"otus/scope@1","engagement":"acme-htb","date":"2026-10-06","targets":["10.10.11.42","*.acme.htb"],"notes":"Parent-supplied task scope"}
 ```
+Optional scope fields: string `notes` and legacy string `authorized_by` (non-gating provenance),
+and `mode` (`network|offline`, default `network` when absent). Network targets must be nonempty
+normalized exact hosts/globs/CIDRs; explicit offline mode requires an empty targets list. Date and
+engagement remain required. Valid historical records remain unchanged; never fabricate provenance.
 
 **run.json — run, evidence, findings, and error handback**
 ```json

@@ -38,7 +38,7 @@ cracking it with stegseek + a wordlist — and capture the extracted payload for
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and stego-file provenance checked
+    desc: Inherited task scope and stego-file provenance checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

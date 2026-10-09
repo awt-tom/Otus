@@ -13,8 +13,9 @@ from real evidence and keep task completion, observed coverage and engagement su
 
 > ⚠️ **Authorized use only.** These skills drive real offensive tools. Use them only against
 > targets you are explicitly permitted to test: in-scope bug-bounty programs, CTF/HTB labs, or
-> systems you own. Scope is confirmed **once per engagement** (recorded in engagement `scope.json`)
-> and inherited by every run; work stops if the target isn't confirmed in scope.
+> systems you own. The coordinator automatically binds supplied task targets once per engagement
+> in `scope.json`; no authorization statement or authorizer record is required. Workers inherit
+> that scope, and mismatched targets still stop before execution. Platform safeguards remain intact.
 
 ## How a skill works
 
@@ -34,7 +35,7 @@ Each `SKILL.md` is deliberately slim and tool-specific (see `templates/SKILL.tem
   `run.json` and `events.jsonl`, and rendered `findings.md`. Evidence goes under `$OTUS_HOME` or
   repository `out/`, grouped by engagement/tool/UTC timestamp; never under skill directories.
 
-The behavioural rules every skill shares — authorization, evidence layout, the `run.json` schema,
+The behavioural rules every skill shares — task scope, evidence layout, the `run.json` schema,
 guardrail handling, non-interactive execution, cleanup verification — live **once** in
 [`AGENTS.md`](AGENTS.md).
 
@@ -46,8 +47,9 @@ tool's install docs.
 
 1. **Verify runtime setup offline.** Check installed versions, discovery, exact worker names and
   resolved tool permissions using the startup checks in [docs/authoring.md](docs/authoring.md#32-runtime-discovery-and-startup-acceptance).
-2. **Confirm scope once.** At the start of an engagement, confirm the target is authorized and
-  provide who authorized which targets; the helper records scope.json once. Every skill inherits it.
+2. **Supply the task scope.** Give the target(s) or local artifact and an optional engagement name.
+  The coordinator binds it automatically; no authorizer declaration or manually prepared record.
+  Related tasks reuse that binding, and workers cannot enroll additional endpoints.
 3. **Give a goal and checked inputs.** For an authorized HTB machine request actual user/root proof;
   for an assessment request minimal verified impact. The coordinator selects one finite skill/profile,
   invokes its exact owner, awaits terminal handback and independently reviews it before a next task.
@@ -72,6 +74,14 @@ contract; the runtime-specific instruction files are **generated** from it.
 - **Claude Code** discovers flat skills and native named workers on supported installed versions;
   verify actual registration/permissions, not only file presence. Other runtimes need the same
   acceptance checks; do not assume their agent/permission compatibility.
+- **OpenCode v2** uses the generated `.opencode/agents/` profiles and project config, with `otus`
+  as the default primary agent for new sessions. Start from the repository root and select `otus`
+  explicitly in an existing session. The same 26 `.claude/skills/` files are discovered natively;
+  workers reuse canonical `.claude/agents/` procedures, not a second framework. CLI commands use
+  `shell`, never JavaScript `execute`; native `subagent` calls use the exact worker names.
+  Provider/model settings remain yours, including Kali-to-LM-Studio connections. Capture literal
+  installed versions and complete the [Kali acceptance checks](docs/authoring.md#34-kali-dual-runtime-acceptance)
+  before claiming a tested runtime pipeline; local structural tests do not prove VM compatibility.
 - **GitHub Copilot** uses native `.claude/skills/` and `.claude/agents/` discovery on supported VS Code
   versions. Select the generated [Otus coordinator](.github/agents/otus.agent.md), or built-in Agent
   with the same exact named delegation. No handoff button or generic-agent substitute. The generated
@@ -84,9 +94,11 @@ contract; the runtime-specific instruction files are **generated** from it.
   supported assigned-verdict writer. No separate native registration diagnostic was exposed.
 - **Regenerate the adapters** after editing the contract:
   ```bash
-  python3 -I scripts/build-runtimes.py   # contracts + YAML-first Copilot coordinator
+  python3 -I scripts/build-runtimes.py   # contracts, Copilot coordinator and OpenCode profiles/config
   ```
-  Edit `AGENTS.md`, never the generated `CLAUDE.md` / `.github/copilot-instructions.md`.
+  Edit `AGENTS.md` and canonical `.claude/agents/` procedures, never their generated adapters.
+  OpenCode profiles inherit the configured model by omitting its model field; Claude's existing
+  `model: inherit` metadata stays unchanged. No skill copies, shell plugin or model-specific tuning.
 
 ## Skill catalog
 
@@ -106,7 +118,8 @@ The full, generated browse-index — every skill by **function** and by **domain
 ## Coordinator and workers
 
 `CLAUDE.md` (generated) defines runtime routing, and `.claude/agents/` holds four subagents
-that run selected skills in isolated contexts, also discovered natively by supported VS Code:
+that run selected skills in isolated contexts, also discovered natively by supported VS Code and
+used as source bodies for generated OpenCode v2 workers:
 
 - **`recon-runner`** — runs read-heavy recon/enumeration (subfinder, httpx, port-scanner, ffuf)
   and returns a concise summary instead of raw dumps.
@@ -127,6 +140,8 @@ AGENTS.md                        # the canonical, runtime-agnostic agent contrac
 CLAUDE.md                        # GENERATED from AGENTS.md + Claude Code routing appendix
 .github/copilot-instructions.md  # GENERATED from AGENTS.md + a Copilot note
 .github/agents/otus.agent.md     # GENERATED coordinator; exact named-worker allowlist
+.opencode/opencode.json         # GENERATED OpenCode v2 default; no provider/model override
+.opencode/agents/               # GENERATED primary otus + the four canonical worker adapters
 .claude/skills/<tool>/SKILL.md   # one capability per tool-named folder; the runbook the agent loads
 .claude/agents/                  # recon-runner, vuln-hunter, reviewer, reporter subagents
 docs/authoring.md                # skill-authoring + verification spec, tool catalog, conventions
@@ -138,7 +153,7 @@ out/                             # timestamped run evidence, grouped by engageme
 
 ## Docs
 
-- [`AGENTS.md`](AGENTS.md) — the shared agent contract (authorization, evidence layout, `run.json`,
+- [`AGENTS.md`](AGENTS.md) — the shared agent contract (task scope, evidence layout, `run.json`,
   guardrail handling, non-interactive execution, cleanup, self-report).
 - [`docs/authoring.md`](docs/authoring.md) — skill format, metadata schema, the `## Checklist`
   verification spec, the tool catalog, the model/effort convention, and the build order.

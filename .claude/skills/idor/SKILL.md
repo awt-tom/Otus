@@ -40,7 +40,7 @@ systematic authz matrix.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization, endpoint, and test-account use checked
+    desc: Inherited task scope, endpoint, and test-account use checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

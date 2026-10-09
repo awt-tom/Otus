@@ -38,7 +38,7 @@ and hand the carved output to the next RE/stego step, with the signature report 
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and blob provenance checked
+    desc: Inherited task scope and blob provenance checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

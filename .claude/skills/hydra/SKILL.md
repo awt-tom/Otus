@@ -39,7 +39,7 @@ cracking use `hashcat`/`john`, not hydra.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and login-service endpoint checked
+    desc: Inherited task scope and login-service endpoint checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

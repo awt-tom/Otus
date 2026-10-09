@@ -3,9 +3,11 @@
 import json
 import ast
 import base64
+import fnmatch
 import os
 import pathlib
 import re
+import runpy
 import subprocess
 import sys
 import tarfile
@@ -84,7 +86,7 @@ class LoggingTests(unittest.TestCase):
             self.assertEqual(json.load(member), self.record(directory))
         self.call("archive", "--engagement", "test", "--out", str(self.home / "test/self.tar.gz"), code=1)
 
-    def test_denied_scope_records_error_without_authorization(self):
+    def test_missing_scope_records_error_without_creating_binding(self):
         directory = self.start()
         self.call("scope-check", "--engagement", "test", "--run-dir", str(directory), code=3)
         self.assertEqual(self.record(directory)["status"], "error")
@@ -356,9 +358,61 @@ class LoggingTests(unittest.TestCase):
         (directory / "evidence/link").symlink_to(pathlib.Path(self.temporary.name))
         self.call("finish", "--run-dir", str(directory), "--status", "complete", "--summary", "reject symlink", code=1)
 
-    def test_authorization_requires_explicit_confirmation(self):
-        self.call("scope-init", "--engagement", "test", "--authorized-by", "test", "--target", "example.test", code=1)
+    def test_scope_binding_needs_targets_not_authorization(self):
+        self.call("scope-init", "--engagement", "test", code=1)
         self.assertFalse((self.home / "test/scope.json").exists())
+        self.call("scope-init", "--engagement", "test", "--target", "https://EXAMPLE.test/path")
+        scope = self.home / "test/scope.json"
+        original = scope.read_bytes()
+        self.assertNotIn("authorized_by", json.loads(original))
+        self.call("scope-check", "--engagement", "test", "--target", "example.test")
+        directory = self.start("example.test")
+        self.call("run", "--run-dir", str(directory), "--", sys.executable, "-c", "print('bound target')")
+        self.assertEqual((directory / "run.log").read_text(), "bound target\n")
+        denied = self.start("outside.test")
+        self.call("run", "--run-dir", str(denied), "--", sys.executable, "-c", "print('must not run')", code=2)
+        events = [json.loads(line) for line in (denied / "events.jsonl").read_text().splitlines()]
+        self.assertNotIn("cmd_start", [event["event"] for event in events])
+        self.assertEqual((denied / "run.log").read_bytes(), b"")
+        self.assertEqual(scope.read_bytes(), original)
+
+    def test_legacy_authorizer_is_optional_provenance_without_confirmation(self):
+        self.call("scope-init", "--engagement", "test", "--authorized-by", "synthetic-test-user",
+                  "--target", "example.test")
+        scope = self.home / "test/scope.json"
+        original = scope.read_bytes()
+        self.assertEqual(json.loads(original)["authorized_by"], "synthetic-test-user")
+        self.call("scope-check", "--engagement", "test", "--target", "example.test")
+        self.call("scope-init", "--engagement", "test", "--target", "example.test")
+        self.assertEqual(scope.read_bytes(), original)
+
+    def test_scope_initialization_is_idempotent_and_rejects_conflicts(self):
+        self.call("scope-init", "--engagement", "test", "--target", "example.test", "--target", "192.0.2.0/24")
+        scope = self.home / "test/scope.json"
+        original = scope.read_bytes()
+        self.call("scope-init", "--engagement", "test", "--target", "192.0.2.0/24",
+                  "--target", "https://EXAMPLE.test/path", "--target", "example.test",
+                  "--authorized-by", "not-a-new-record", "--confirmed")
+        self.assertEqual(scope.read_bytes(), original)
+        self.call("scope-init", "--engagement", "test", "--target", "outside.test", code=1)
+        self.call("scope-init", "--engagement", "test", "--offline", code=1)
+        self.assertEqual(scope.read_bytes(), original)
+
+    def test_offline_binding_allows_local_work_but_rejects_network_targets(self):
+        self.call("scope-init", "--engagement", "invalid", "--offline", "--target", "example.test", code=1)
+        self.assertFalse((self.home / "invalid/scope.json").exists())
+        self.call("scope-init", "--engagement", "test", "--offline")
+        scope = json.loads((self.home / "test/scope.json").read_text())
+        self.assertEqual(scope["targets"], [])
+        self.assertEqual(scope["mode"], "offline")
+        self.assertNotIn("authorized_by", scope)
+        self.call("scope-check", "--engagement", "test")
+        directory = self.start()
+        self.call("run", "--run-dir", str(directory), "--", sys.executable, "-c", "print('local artifact')")
+        denied = self.start("example.test")
+        self.call("run", "--run-dir", str(denied), "--", sys.executable, "-c", "print('must not run')", code=2)
+        self.assertEqual((denied / "run.log").read_bytes(), b"")
+        self.call("scope-init", "--engagement", "test", "--target", "example.test", code=1)
 
     def test_partial_cleanup_is_visible_in_rendered_findings(self):
         directory = self.start()
@@ -393,6 +447,37 @@ class LoggingTests(unittest.TestCase):
         events = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
         self.assertEqual([event["seq"] for event in events], list(range(1, 8)))
 
+    def test_parallel_scope_initialization_keeps_engagements_isolated(self):
+        bindings = (("test", "example.test"), ("other", "other.test"))
+        processes = [subprocess.Popen([sys.executable, "-I", str(HELPER), "scope-init",
+                                       "--engagement", engagement, "--target", target], env=self.env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                     for engagement, target in bindings for attempt in range(3)]
+        for process in processes:
+            output, errors = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, errors.decode())
+        for engagement, target in bindings:
+            scope = json.loads((self.home / engagement / "scope.json").read_text())
+            self.assertEqual(scope["targets"], [target])
+            self.assertNotIn("authorized_by", scope)
+            self.call("scope-check", "--engagement", engagement, "--target", target)
+            other_target = "other.test" if engagement == "test" else "example.test"
+            self.call("scope-check", "--engagement", engagement, "--target", other_target, code=2)
+
+    def test_competing_scope_initializations_never_merge_targets(self):
+        processes = [subprocess.Popen([sys.executable, "-I", str(HELPER), "scope-init",
+                                       "--engagement", "test", "--target", target], env=self.env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                     for target in ("example.test", "outside.test")]
+        results = []
+        for process in processes:
+            process.communicate(timeout=10)
+            results.append(process.returncode)
+        self.assertEqual(sorted(results), [0, 1])
+        scope = json.loads((self.home / "test/scope.json").read_text())
+        self.assertEqual(len(scope["targets"]), 1)
+        self.assertIn(scope["targets"][0], ("example.test", "outside.test"))
+
     def test_default_root_is_repo_out_without_writing_there(self):
         environment = dict(self.env)
         environment.pop("OTUS_HOME")
@@ -419,6 +504,90 @@ class LoggingTests(unittest.TestCase):
 
 
 class WiringTests(unittest.TestCase):
+    def test_target_scope_contract_and_review_do_not_require_authorizers(self):
+        repo = HELPER.parent.parent
+        contract = (repo / "AGENTS.md").read_text()
+        self.assertIn("## Task scope gate (hard)", contract)
+        self.assertIn("No authorization statement, authorizer record", contract)
+        self.assertIn("Workers inherit and validate scope", contract)
+        self.assertIn("--offline", contract)
+        self.assertIn("Legacy authorization", contract)
+        self.assertNotIn('scope-init --engagement\n"$ENGAGEMENT" --authorized-by', contract)
+        generator = runpy.run_path(str(repo / "scripts/build-runtimes.py"))
+        self.assertIn("Initialize the parent-bound task scope", generator["COORDINATOR_BODY"])
+        for path in (repo / ".claude/skills").glob("*/SKILL.md"):
+            checklist = path.read_text().split("- id: scope-confirmed", 1)[1].split("- id:", 1)[0]
+            self.assertIn("Inherited task", checklist)
+            self.assertNotIn("authorization", checklist)
+            self.assertIn("evidence: ../../scope.json", checklist)
+        reviewer = (repo / ".claude/agents/reviewer.md").read_text()
+        reporter = (repo / ".claude/agents/reporter.md").read_text()
+        self.assertIn("optional provenance, not proof or a prerequisite", reviewer)
+        self.assertIn("missing optional", reporter)
+        self.assertIn("Scope & task context", reporter)
+        self.assertNotIn("unverified authorization", reporter)
+
+    def test_opencode_profiles_reuse_canonical_bodies_and_native_permissions(self):
+        repo = HELPER.parent.parent
+        generator = runpy.run_path(str(repo / "scripts/build-runtimes.py"))
+        outputs = generator["opencode_outputs"]()
+        self.assertEqual(len(outputs), 6)
+        self.assertEqual(json.loads(outputs[repo / ".opencode/opencode.json"]),
+                         {"default_agent": "otus"})
+        for name in ("otus", *generator["WORKERS"]):
+            with self.subTest(name=name):
+                rendered = outputs[repo / ".opencode/agents" / (name + ".md")]
+                header = generator["CATALOG"]["_frontmatter"](rendered)
+                rules = [json.loads(line[4:]) for line in header.splitlines() if line.startswith("  - ")]
+                self.assertTrue(rules)
+                self.assertTrue(all(set(rule) == {"action", "resource", "effect"} for rule in rules))
+                self.assertIn("mode: " + ("primary" if name == "otus" else "subagent"), header)
+                self.assertNotRegex(header, r"(?m)^(?:model|tools|prompt|permission|agent|context|effort):")
+                self.assertIn("use the shell tool directly", rendered)
+                self.assertIn("Shell timeout is milliseconds", rendered)
+                self.assertIn("foreground subagent tool", rendered)
+
+                def effect(action, resource):
+                    matched = [rule["effect"] for rule in rules
+                               if fnmatch.fnmatchcase(action, rule["action"])
+                               and fnmatch.fnmatchcase(resource, rule["resource"])]
+                    return matched[-1] if matched else "ask"
+
+                self.assertEqual(effect("execute", "*"), "deny")
+                self.assertEqual(effect("subagent", "general"), "deny")
+                self.assertEqual(effect("external_directory", "/tmp/custom-evidence/*"), "ask")
+                self.assertEqual(effect("read", "local.env"), "ask")
+                if name == "otus":
+                    self.assertTrue(rendered.endswith(generator["COORDINATOR_BODY"].rstrip() + "\n"))
+                    for worker in generator["WORKERS"]:
+                        self.assertEqual(effect("subagent", worker), "allow")
+                else:
+                    description, metadata, body = generator["role_source"](name)
+                    self.assertTrue(rendered.endswith(body.rstrip() + "\n"))
+                    source = (repo / ".claude/agents" / (name + ".md")).read_text()
+                    canonical_body = source.split("\n---\n", 1)[1].strip()
+                    self.assertTrue(rendered.endswith(canonical_body + "\n"))
+                    self.assertIn("description: " + json.dumps(description), header)
+                    self.assertEqual(effect("subagent", "reviewer"), "deny")
+                if name == "reviewer":
+                    self.assertEqual(effect("shell", "date -u"), "deny")
+                    self.assertEqual(effect("edit", "out/test/nuclei/run/review.json"), "allow")
+                    self.assertEqual(effect("edit", "out/test/nuclei/run/run.json"), "deny")
+                    self.assertEqual(effect("webfetch", "https://example.test"), "deny")
+                elif name == "reporter":
+                    self.assertEqual(effect("shell", "base64 assets/otus-logo.png"), "allow")
+                    self.assertEqual(effect("shell", "python3 -c 'print(1)'"), "deny")
+                    self.assertEqual(effect("shell", "curl https://example.test"), "deny")
+                    self.assertEqual(effect("edit", "out/test/report/run/run.json"), "allow")
+                    self.assertEqual(effect("edit", "out/test/nuclei/run/run.json"), "deny")
+                else:
+                    self.assertEqual(effect("shell", "python3 -I scripts/otus-log.py --help"), "allow")
+                self.assertEqual(effect("edit", ".claude/skills/nuclei/SKILL.md"), "deny")
+        self.assertEqual(outputs, generator["opencode_outputs"]())
+        for appendix in (generator["CLAUDE_APPENDIX"], generator["COPILOT_APPENDIX"]):
+            self.assertNotIn("Code Mode", appendix)
+            self.assertNotIn("Shell timeout is milliseconds", appendix)
+
     def test_authoring_template_and_readme_use_real_bounded_ownership(self):
         repo = HELPER.parent.parent
         template = (repo / "templates/SKILL.template.md").read_text()
@@ -431,6 +600,11 @@ class WiringTests(unittest.TestCase):
         self.assertIn("notes/task.md", template)
         self.assertIn("Preserve native empty files unchanged", template)
         self.assertIn("### 3.2 Runtime discovery and startup acceptance", guide)
+        self.assertIn("### 3.3 OpenCode v2 adapter", guide)
+        self.assertIn("### 3.4 Kali dual-runtime acceptance", guide)
+        self.assertIn("155000 ms", guide)
+        self.assertIn("all seven actual checks", guide)
+        self.assertIn("no authorizer declaration", guide)
         self.assertNotIn("max_part_retries", guide)
         self.assertNotIn('echo "no findings" > nuclei.txt', guide)
         self.assertIn("terminal partial/native-budget", guide)
@@ -441,6 +615,10 @@ class WiringTests(unittest.TestCase):
             self.assertIn(source, guide)
         self.assertNotIn("skillDirectories", readme)
         self.assertIn(".github/agents/otus.agent.md", readme)
+        self.assertIn("**OpenCode v2**", readme)
+        self.assertIn(".opencode/agents/", readme)
+        self.assertIn("No skill copies, shell plugin or model-specific tuning", readme)
+        self.assertNotIn("provide who authorized which targets", readme)
         self.assertIn("reporter shell assembly was unavailable", readme)
 
     def test_review_is_locked_and_report_requires_individual_proof_and_coverage(self):
@@ -787,6 +965,9 @@ class WiringTests(unittest.TestCase):
             self.assertIn("agents: [recon-runner, vuln-hunter, reviewer, reporter]", generated)
             self.assertIn("agent, todo]", generated)
             self.assertLess(generated.index("---\n", 4), generated.index("<!-- GENERATED"))
+        for path, content in module["opencode_outputs"]().items():
+            self.assertEqual(path.read_text(), content)
+        self.assertFalse((HELPER.parent.parent / ".opencode/skills").exists())
         self.assertEqual(before, [path.read_bytes() for path in sources])
 
 

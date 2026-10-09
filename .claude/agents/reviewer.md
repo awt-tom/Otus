@@ -27,7 +27,9 @@ Procedure:
 2. Read `<run_dir>/run.json`, `events.jsonl`, and the engagement's `scope.json`. Validate schema
   versions and scope fields through Read (same engagement-only gate as scope-check, without invoking
   the helper in this locked agent). Reporter is exempt from the active gate, but its report must
-  accurately disclose authorization. Missing/invalid records -> FAILED; unversioned legacy ->
+  accurately disclose task scope. Scope needs matching engagement/date and normalized targets;
+  network mode (default) needs targets, explicit offline mode needs none. Authorizer/notes fields
+  are optional provenance, not proof or a prerequisite. Missing/invalid records -> FAILED; unversioned legacy ->
   NON-COMPLIANT without modifying it. Null finished/unfinished partial -> FAILED, never completed.
   Hard error -> FAILED with no retries. A respected platform guardrail is the compliance-only
   exception defined in AGENTS.md: judge the stop/handback invariants, not unfinished action items;

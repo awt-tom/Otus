@@ -38,7 +38,7 @@ without root), `linux-exploit-suggester` / `wesng` (kernel/OS → known exploits
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and foothold host checked
+    desc: Inherited task scope and foothold host checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

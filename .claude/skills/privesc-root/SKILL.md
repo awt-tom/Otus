@@ -38,7 +38,7 @@ Do not repeat broad enumeration merely because a root flag has not yet been reac
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and foothold/proof host checked
+    desc: Inherited task scope and foothold/proof host checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

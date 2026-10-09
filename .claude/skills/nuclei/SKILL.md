@@ -25,8 +25,8 @@ No hits means only no confirmed result in the declared template/endpoint set.
 
 ## Steps
 1. Use a small plain HOSTS URL list. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill nuclei --profile selected-templates --coverage-set 'At most 20 technology-relevant cached templates')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --targets-file "$HOSTS" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, endpoint count, 180-second command allocation and escalation trigger.
-2. Verify installed Nuclei/version/help and cached templates locally; no per-target update/clone. Record exact <=20 selected template paths/versions and applicability in notes/templates.txt; TEMPLATES names only those paths, not an entire store. Inspect induced endpoints and exclude code/headless/DoS/brute/fuzz behavior. No authorized usable cache -> setup limitation, no scan.
-3. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" --timeout 180 --grace 5 -- nuclei -l "$HOSTS" -t "$TEMPLATES" -c 2 -bs 1 -rate-limit 10 -timeout 5 -retries 0 -mhe 5 -dr -ni -duc -no-stdin -jsonl -o "$RUN/evidence/nuclei.jsonl"`. Disable redirects/OOB/update checks; every induced destination must remain checked. An explicitly authorized collaborator is a separate justified configuration.
+2. Verify installed Nuclei/version/help and cached templates locally; no per-target update/clone. Record exact <=20 selected template paths/versions and applicability in notes/templates.txt; TEMPLATES names only those paths, not an entire store. Inspect induced endpoints and exclude code/headless/DoS/brute/fuzz behavior. No checked usable cache -> setup limitation, no scan.
+3. `python3 -I scripts/otus-log.py run --run-dir "$RUN" --targets-file "$HOSTS" --timeout 180 --grace 5 -- nuclei -l "$HOSTS" -t "$TEMPLATES" -c 2 -bs 1 -rate-limit 10 -timeout 5 -retries 0 -mhe 5 -dr -ni -duc -no-stdin -jsonl -o "$RUN/evidence/nuclei.jsonl"`. Disable redirects/OOB/update checks; every induced destination must remain checked. A parent-bound collaborator is a separate justified configuration.
 4. Preserve empty native JSONL unchanged. Read completion/skip/error counters from raw output, assess native host/template skips and actual coverage in notes/coverage.md; exit zero alone is not full coverage. Unknown counts remain unknown; stop heavy work on degraded health. Broader template sets need a matched lead or declared assessment coverage requirement, not severity broadening alone.
 5. Verify each candidate with a minimal checked request within the task allocation; save raw requests/responses and notes/triage.md, including scoped no-hit/false-positive results. Verification CLI: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 15 -- <verified one-shot argv>`. If allocation ends before triage, remain partial and do not claim an unverified finding.
 6. Complete only the actually finished selected task; native skips/budget -> partial, hard failure -> error and stop. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Unselected templates and endpoints' --item 'scope-confirmed=ok:../../scope.json' --item 'templates-selected=ok:notes/templates.txt' --item 'scan-ran=ok:events.jsonl' --item 'triaged=ok:notes/triage.md' --item 'coverage-assessed=ok:notes/coverage.md'`; add only evidence-backed findings and actual target-state/cleanup fields. Return to coordinator for review.
@@ -39,7 +39,7 @@ Minimal manual requests confirm candidates without a broad scanner chain.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and every live-list target checked
+    desc: Inherited task scope and every live-list target checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

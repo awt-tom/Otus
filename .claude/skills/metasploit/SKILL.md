@@ -40,7 +40,7 @@ when you don't want the full framework.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and every RHOSTS target checked; LHOST recorded
+    desc: Inherited task scope and every RHOSTS target checked; LHOST recorded
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

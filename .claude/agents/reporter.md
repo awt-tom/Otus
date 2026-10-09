@@ -56,7 +56,8 @@ Turn evidence-root records into one canonical markdown report (`…/report/engag
   goes into run.log. Outputs go both into OTUS_RUN and latest report/engagement-report.{md,html}.
 2. **Index runs:** read engagement scope.json (`otus/scope@1`), then every run.json (`otus/run@1`)
   and matching review.json (`otus/review@1`); index skill/run_dir/status/verdict. Never create or
-  modify authorization. Invalid/missing scope is disclosed as unverified authorization; reporter
+  modify task scope. Invalid/missing scope is disclosed as unknown task binding; missing optional
+  authorizer provenance is not an error or an authorization claim. Reporter
   remains target-contact exempt. Do not rewrite legacy evidence or invent missing events.
   Read coordinator notes/progress.md for goal and allocation context, never as finding proof.
   Index optional coverage, omissions and stop reasons; absent metadata stays unknown.
@@ -72,7 +73,8 @@ Turn evidence-root records into one canonical markdown report (`…/report/engag
 5. **Cleanup state.** For any run that changed target state, report whether cleanup was **verified**
    (`loot/cleanup_verify.txt` with positive absence evidence) or **STILL OWED** — surface owed cleanup near the top.
 6. **Write `engagement-report.md`** (canonical), sections in order: (a) **Executive summary** (client-facing);
-  (b) **Scope & authorization** (from engagement `scope.json`); **Goal & coverage** (actual user/root
+  (b) **Scope & task context** (from engagement `scope.json`, with optional historical provenance
+  labeled as such, never invented); **Goal & coverage** (actual user/root
   proof or minimal assessment impact, gaps, tested/omitted sets, time/health/escalation rationale);
   separate declared task completion, observed coverage and engagement-goal achievement. Keep unknown
   target state/cleanup and absent optional metadata explicitly unknown; no "clean" or "fully tested" inference.

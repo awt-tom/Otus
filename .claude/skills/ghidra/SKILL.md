@@ -38,7 +38,7 @@ are alternatives. Quick-triage companions: `strings`/`objdump`/`readelf`/`ltrace
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and binary provenance checked
+    desc: Inherited task scope and binary provenance checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

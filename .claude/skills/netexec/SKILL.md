@@ -39,7 +39,7 @@ BloodHound (`nxc --bloodhound`); pairs with `impacket` and `hashcat` for crackin
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and every authentication/pivot target checked
+    desc: Inherited task scope and every authentication/pivot target checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

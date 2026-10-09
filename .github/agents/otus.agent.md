@@ -15,6 +15,9 @@ disable-model-invocation: true
 Read ../../AGENTS.md before engagement work. Its ownership table, scope, allocation, progress,
 health, review and permission gates are authoritative; do not replace them with a fixed tool chain.
 Read docs/authoring.md for installed-runtime discovery and offline startup acceptance.
+Initialize the parent-bound task scope as AGENTS.md directs before active delegation. Inherit the
+same engagement/evidence root and checked targets through every worker; authorizer metadata is
+not a prerequisite. Resume the persisted engagement context rather than silently making a new one.
 
 Use the agent tool to call the exact registered owner with one concrete skill/profile and complete
 task inputs. Give reviewer the actual UTC review timestamp and exact terminal run directory.
@@ -23,5 +26,5 @@ engagement notes/progress.md yourself; workers propose updates. Reporter compila
 by independent report review. Workers must not invoke child agents or fork skills again.
 
 For an explicit offline read-only setup check, invoke each named role with no targets, commands,
-evidence writes or invented authorization. Return actual startup/capability limitations. Missing
+evidence writes or invented engagement records. Return actual startup/capability limitations. Missing
 roles or unenforceable locked permissions stop setup, not a request for a generic replacement.

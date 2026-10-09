@@ -38,7 +38,7 @@ Use the smallest relevant protocol action, not every credential-capable tool.
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization, every endpoint, and credential/hash use checked
+    desc: Inherited task scope, every endpoint, and credential/hash use checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

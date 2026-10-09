@@ -39,7 +39,7 @@ ssh2john, …) bridge formats. Heuristic mode guesses need source-format confirm
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and artifact provenance checked; reuse gated separately
+    desc: Inherited task scope and artifact provenance checked; reuse gated separately
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

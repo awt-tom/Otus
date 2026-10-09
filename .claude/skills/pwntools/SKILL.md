@@ -38,7 +38,7 @@ shells; `angr` for symbolic execution; `checksec` for mitigations. Pair with `gh
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and binary provenance; remote endpoint checked if used
+    desc: Inherited task scope and binary provenance; remote endpoint checked if used
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

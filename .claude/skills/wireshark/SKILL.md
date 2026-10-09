@@ -38,7 +38,7 @@ here); `tcpdump` to capture; `NetworkMiner` for automated carving. For huge pcap
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and capture provenance checked; PII handled responsibly
+    desc: Inherited task scope and capture provenance checked; PII handled responsibly
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

@@ -41,7 +41,7 @@ ProjectDiscovery `httpx` is the standard probe/fingerprinter — **not** the Pyt
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and every input host checked
+    desc: Inherited task scope and every input host checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

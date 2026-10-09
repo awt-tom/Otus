@@ -27,7 +27,7 @@ read, shell) â€” pulling the **minimum** data needed and recording payloads for 
 1. Save a stable nonempty REQ, actual TARGET and one selected PARAM. `RUN="$(python3 -I scripts/otus-log.py init --engagement "$ENGAGEMENT" --skill sqlmap --target "$TARGET" --profile selected-parameter --coverage-set 'One captured request and parameter')"`; `python3 -I scripts/otus-log.py scope-check --engagement "$ENGAGEMENT" --target "$TARGET" --run-dir "$RUN"`; nonzero STOP. Write notes/task.md with hypothesis, tool/version, 120-second allocation and confirmation criterion. Missing request/parameter -> disclose input failure before contact.
 2. Minimal detection: `python3 -I scripts/otus-log.py run --run-dir "$RUN" --target "$TARGET" --timeout 120 --grace 5 -- sqlmap -r "$REQ" -p "$PARAM" --batch --level 1 --risk 1 --threads 1 --timeout 5 --retries 0 --ignore-redirects --output-dir "$RUN/sqlmap-output" -t "$RUN/evidence/http-traffic.txt"`. No unrelated cached targets, blanket tests or automatic data extraction.
 3. Inspect actual injection/fingerprint evidence and stability, not just a success banner. Save payload/response refs, tested parameter, coverage and omissions in notes/assessment.md. No injection confirmed applies only to this test. Native inconclusive/budget -> partial; helper nonzero -> error, stop.
-4. Database/table enumeration, selected data extraction, tamper or OS/file actions require a separate objective-relevant hypothesis/allocation and existing authorization; none is a mandatory checklist step. No whole-DB dump, interactive OS shell or automatic escalation/retry. Record state-changing effects and positive cleanup evidence where applicable.
+4. Database/table enumeration, selected data extraction, tamper or OS/file actions require a separate objective-relevant hypothesis/allocation and existing task scope; none is a mandatory checklist step. No whole-DB dump, interactive OS shell or automatic escalation/retry. Record state-changing effects and positive cleanup evidence where applicable.
 5. `python3 -I scripts/otus-log.py finish --run-dir "$RUN" --status "$STATUS" --summary "$SUMMARY" --stop-reason "$STOP" --omitted 'Other parameters, higher levels and data extraction' --item 'scope-confirmed=ok:../../scope.json' --item 'detection-ran=ok:events.jsonl' --item 'data-minimised=ok:notes/assessment.md'`; include only real evidence-backed findings and actual cleanup/state fields. Return the minimum proved impact to the coordinator.
 
 ## Modern tooling & alternatives
@@ -38,7 +38,7 @@ blind SQLi, hand-crafted payloads + Burp Repeater. **Banned in the OSCP exam** â
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization and request endpoint checked
+    desc: Inherited task scope and request endpoint checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail

@@ -10,10 +10,9 @@
 > consistency are stated **once** in `AGENTS.md`. This guide never restates them — a skill body
 > references them with the single line `Shared contract: see AGENTS.md`.
 >
-> **Scope / authorization.** Every skill is for *authorized* work only — in-scope bug-bounty
-> programs, CTF/HTB labs, and systems you own or have written permission to test. Authorization is
-> confirmed **once per engagement** in `<root>/<engagement>/scope.json` (see `AGENTS.md`); skills inherit
-> it and never re-confirm per run.
+> **Task scope.** Every skill is for legitimate lab/authorized work. The parent automatically binds
+> supplied targets or explicit offline work once in `<root>/<engagement>/scope.json` (see `AGENTS.md`).
+> Skills inherit targeting context, not an authorization declaration or authorizer prerequisite.
 >
 > **Design basis:** goal-driven selection, bounded profiles and actual native evidence. Tool-specific
 > defaults live in the owning runbooks; researched sources/rationale are linked in §5.14.
@@ -119,8 +118,9 @@ the lifecycle in AGENTS.md. Real network tools are not required for the helper's
 
 | Subcommand | Role |
 |---|---|
-| `scope-init --engagement S --authorized-by WHO --target T --confirmed` | Records explicit user authorization once; repeat target; optional note/force. Force requires user-approved replacement. |
-| `scope-check --engagement S [--target T] [--targets-file FILE] [--run-dir DIR]` | Checks authorization and every endpoint; exits 0/2/3. With run-dir, denied checks write error handback. |
+| `scope-init --engagement S --target T` | Parent binds supplied targets once; repeat target. Same normalized binding is idempotent; differing scope needs explicit user-approved replacement. Legacy authorizer/confirmed inputs are optional. |
+| `scope-init --engagement S --offline` | Parent explicitly binds a purely local task without network targets. Cannot pass a remote endpoint check. |
+| `scope-check --engagement S [--target T] [--targets-file FILE] [--run-dir DIR]` | Checks task binding and every endpoint; exits 0/2/3. Missing authorizer is not an error. With run-dir, denied checks write error handback. |
 | `init --engagement S --skill NAME [--profile P] [--coverage-set C]` | Creates isolated partial record/events/raw log/findings; existing target/run-dir options remain. |
 | `run --run-dir DIR [scope options] --timeout N --grace G [--outcome-policy P] -- CMD...` | Bounded process-group execution, raw capture and actual child/helper outcome metadata; policy in AGENTS.md. |
 | `event --run-dir DIR --event marker --note M` | Records actual manual work; guardrail_stop with block/request-id finalizes the required stop handback. |
@@ -136,7 +136,7 @@ and tool-native files remain private and may contain secrets. Record failures ra
 any nonzero as success; a terminal error may be enriched but never reopened.
 
 The four canonical models live ONLY in AGENTS.md's **Versioned JSON models** section:
-`otus/scope@1` (authorization), `otus/run@1` (run/findings/handback), `otus/event@1` (timeline),
+`otus/scope@1` (task binding, optional historical provenance), `otus/run@1` (run/findings/handback), `otus/event@1` (timeline),
 and `otus/review@1` (independent verdict). Link to them; do not copy schema definitions into skills.
 Standalone review writes its verdict through the reviewer-role exception; locked reviewer/report
 agents never invoke Python. Their direct Write outputs follow the same models and are independently
@@ -162,7 +162,8 @@ an unfinished partial record is never promoted to complete.
 Verification: `python3 -I scripts/test-otus-log.py` uses synthetic fixtures/temp directories,
 covering scope gates, failures/signals, raw output, ordering, escaping, archive restoration, and
 skill/agent wiring. After a contract or routing edit, run `python3 -I scripts/build-runtimes.py`;
-the first generation changes contracts/coordinator, and a second generation must produce no additional diff.
+the first generation changes contracts/coordinators/OpenCode profiles, and a second generation
+must produce no additional diff. Valid historical scope/evidence files are never migrated.
 
 ### 3.2 Runtime discovery and startup acceptance
 
@@ -192,6 +193,88 @@ Local setup observation: VS Code 1.140.0 / Copilot 0.68.0 launched all four exac
 no separate registration diagnostic was exposed. Reviewer had no execution and create-only verdict
 writing; reporter had no shell, so report assembly/end-to-end acceptance remains blocked.
 This is a tested-harness limitation, not a portable minimum version or an instruction to widen tools.
+
+### 3.3 OpenCode v2 adapter
+
+The adapter targets documented **v2**, not v1 `permission`/`bash`/`task` configuration. Obtain
+literal `opencode --version`, `opencode --help` and `claude --version` output from Kali; a model's
+self-description or the website's download version is not an installed-version check. The local
+suite verifies generated structure, not an installed Kali release or actual permission enforcement.
+
+Start OpenCode at the repository root with a new session, or select `otus` explicitly in an existing
+session. `.opencode/opencode.json` chooses only the default agent; it does not change provider,
+model, endpoint, credentials or global permissions. Keep local/cloud/LM Studio configuration in
+the user's existing setup, including the VM-to-host connection. No model-specific tuning or plugin.
+
+`scripts/build-runtimes.py` generates `otus` plus exact `recon-runner`, `vuln-hunter`, `reviewer`
+and `reporter` Markdown profiles. Canonical worker procedures remain under `.claude/agents/`.
+OpenCode discovers the same `.claude/skills/<name>/SKILL.md` files, strips their frontmatter on
+load, and does not dispatch Claude `context: fork`/`agent` metadata. The parent routes to the owner;
+workers Read the selected original runbook in their existing context. Do not copy skills or route
+an internal IP through subfinder. Missing named registration fails setup without a generic fallback.
+
+Generated system bodies carry the runtime mapping directly because v2's accepted `instructions`
+config currently does not load its entries. V2 reads shared AGENTS.md, not a CLAUDE.md fallback.
+OpenCode model fields are omitted to inherit the configured session model; Claude metadata and
+its native routing/tool names remain unchanged.
+
+Use direct foreground `shell` for CLI/OS commands; `execute` is JavaScript Code Mode and is denied
+for these Otus profiles, not globally. Use `subagent` foreground calls and await terminal handbacks.
+Set shell `workdir` to the repo root; each call is fresh, so pass environment and absolute run paths
+explicitly. Shell timeout uses **milliseconds**, helper timeout/grace use seconds. The outer timeout
+must exceed `(helper timeout + grace + 30) * 1000` to allow shutdown and evidence flushing; for a
+120-second helper and five-second grace, use at least 155000 ms. Keep helper-native finite bounds
+and non-interactive/closed-stdin rules; an outer timeout is still a failure, never a successful scan.
+
+Permissions use ordered v2 `action`/`resource`/`effect` rules, last match wins. Workers cannot launch
+subagents; reviewer has no shell/network and may write verdicts only; reporter allows only the
+canonical local encode/concat/measure commands. Static path rules cover repository `out/`; exact
+assigned engagement/run paths remain a role contract, not a filesystem sandbox. Shell command
+scanning is best effort and cannot prove filesystem or network confinement.
+
+For an external/custom OTUS_HOME, retain only user-approved boundaries. Generated profiles do not
+silently grant external-root access; actual read/edit/external-directory permissions must resolve
+for that root and assigned role. Inspect merged project/global/managed rules and saved approvals.
+Never widen permissions or switch settings automatically. Broad or unenforceable reporter shell
+permissions stop assembly, and missing verdict replacement support is disclosed separately.
+
+Official v2 references: [agents](https://opencode.ai/v2/docs/agents),
+[tools](https://opencode.ai/v2/docs/tools), [permissions](https://opencode.ai/v2/docs/permissions),
+[skills](https://opencode.ai/v2/docs/skills), [config](https://opencode.ai/v2/docs/config) and
+[instructions](https://opencode.ai/v2/docs/instructions). Recheck these against the installed version.
+
+### 3.4 Kali dual-runtime acceptance
+
+Run the local synthetic suite and generator consistency checks first. Then the operator runs all
+seven checks in Kali, retaining actual tool traces and private evidence references. Capture literal
+versions and the current Claude baseline before testing OpenCode. Do not use a historical lab IP
+without selecting the currently assigned instance; no target contact is needed for negative checks.
+
+1. **Claude regression:** existing named-worker/direct-skill flow and bounded concurrent independent
+  tasks still produce terminal evidence, independent verdicts, report and report review. Only
+  target-only initialization differs; no Claude tool/fork/metadata change.
+2. **Basic execution:** a normal Nmap service-scan request for the supplied lab target selects direct
+  `shell` without user reminders. Inspect actual helper/Nmap events/native output; no Code Mode or
+  "Unexpected token" result. Generated prompts are not proof of correct tool selection.
+3. **Named delegation:** `otus` actually launches exact `recon-runner` with one bounded port-scanner
+  profile and inherited inputs, awaits its terminal handback, then invokes the independent reviewer.
+  File presence or an Explore/general substitute cannot satisfy registration.
+4. **Shared skills:** both runtimes discover all 26 IDs and read the same canonical skill paths/bodies.
+  No duplicate skill directory or provider-specific corpus; Claude fork metadata is not v2 routing.
+5. **No authorization prerequisite:** in an isolated evidence root, a target-only task automatically
+  binds scope and starts permitted work with no authorizer declaration, record or confirmation flag.
+  Also check explicit offline artifact binding without an invented endpoint.
+6. **Target propagation:** inherited engagement/root/target remain identical through coordinator,
+  worker, helper and native output. Synthetic mixed/outside targets and unchecked redirects stop
+  before contact; child scopes never enroll new endpoints. Do not probe an outside live target.
+7. **Evidence pipeline:** real terminal run.json, ordered paired events, raw log/native output and
+  matching findings.md lead to a fresh independent review.json, eligible markdown/self-contained
+  HTML report and report review. Check verdict replacement, default/custom approved evidence roots,
+  isolated concurrency, and truthful error/refusal records with no dependent continuation.
+
+Record PASS/FAIL/unavailable per check, actual versions, evidence paths, omissions and cleanup owed.
+Unsupported stages are acceptance gaps, not success. Only all seven actual checks justify claiming
+a tested dual-runtime pipeline; the no-network local suite and static permission checks cannot.
 
 ---
 
@@ -595,9 +678,9 @@ It declares each required part *and how to verify it from evidence*. (Example in
 ```yaml
 checklist:
   - id: scope-confirmed            # stable, unique within the skill; ALWAYS first
-    desc: Explicit engagement authorization and applicable endpoints checked
+    desc: Inherited task scope and applicable endpoints checked
     verify: judge
-    evidence: ../../scope.json     # inherited engagement authorization
+    evidence: ../../scope.json     # inherited task binding
     on_fail: fail
     required: true
   - id: <step-id>

@@ -40,7 +40,7 @@ SMB/WinRM across a subnet use **`netexec`**; for Windows tickets/hashes use **`i
 ```yaml
 checklist:
   - id: scope-confirmed
-    desc: Explicit engagement authorization, endpoint, and supplied credential use checked
+    desc: Inherited task scope, endpoint, and supplied credential use checked
     verify: judge
     evidence: ../../scope.json
     on_fail: fail
