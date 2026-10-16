@@ -4,8 +4,8 @@ description: >
   Executes one selected bounded web, access, privilege, AD, credential or artifact skill.
   Use for nuclei, sqlmap, xss, ssrf, idor, burpsuite, exploitation, ssh-foothold,
   metasploit, linpeas, privesc-root, netexec, bloodhound, impacket, hashcat, hydra,
-  binwalk, steghide, wireshark, ghidra or pwntools on explicitly authorized inputs.
-tools: Read, Write, Grep, Glob, Bash
+  binwalk, steghide, wireshark, ghidra, pwntools or hexstrike on explicitly authorized inputs.
+tools: Read, Write, Grep, Glob, Bash, mcp__hexstrike__nuclei_scan, mcp__hexstrike__sqlmap_scan, mcp__hexstrike__ffuf_scan, mcp__hexstrike__wpscan_scan
 model: inherit
 effort: medium
 ---

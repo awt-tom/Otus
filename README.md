@@ -76,7 +76,7 @@ contract; the runtime-specific instruction files are **generated** from it.
   acceptance checks; do not assume their agent/permission compatibility.
 - **OpenCode v2** uses the generated `.opencode/agents/` profiles and project config, with `otus`
   as the default primary agent for new sessions. Start from the repository root and select `otus`
-  explicitly in an existing session. The same 26 `.claude/skills/` files are discovered natively;
+  explicitly in an existing session. The same 27 `.claude/skills/` files are discovered natively;
   workers reuse canonical `.claude/agents/` procedures, not a second framework. CLI commands use
   `shell`, never JavaScript `execute`; native `subagent` calls use the exact worker names.
   Provider/model settings remain yours, including Kali-to-LM-Studio connections. Capture literal
@@ -86,6 +86,13 @@ contract; the runtime-specific instruction files are **generated** from it.
   versions. Select the generated [Otus coordinator](.github/agents/otus.agent.md), or built-in Agent
   with the same exact named delegation. No handoff button or generic-agent substitute. The generated
   contract is auto-included; do not invent a discovery setting.
+- **HexStrike MCP** (optional) runs on the engagement VM; `scripts/build-runtimes.py` generates the
+  Claude Code `.mcp.json` and the OpenCode `.opencode/opencode.json` `mcp.servers.hexstrike` entry —
+  both gitignored local runtime config — plus a `.claude/settings.local.json` enable/allow list. A
+  curated tool set reaches `otus`, `recon-runner` and `vuln-hunter` only (reviewer/reporter get none);
+  drive each call through the `hexstrike` skill so scope checks and `otus-log.py` markers land in the
+  same evidence trail. Set `HEXSTRIKE_HOME` / `HEXSTRIKE_SERVER` (defaults `/opt/hexstrike-ai`,
+  `http://127.0.0.1:8888`) before regenerating; never commit a real host/path.
 - Reviewer has no execution; reporter assembly needs runtime-enforced restricted encode/concat/
   measure tools. If aliases resolve broadly or required tools are absent, setup fails closed; agents
   never widen permissions. In the tested VS Code 1.140.0 / Copilot 0.68.0 harness all four roles
@@ -113,7 +120,7 @@ The full, generated browse-index — every skill by **function** and by **domain
 | **AD / network** | `netexec` · `bloodhound` · `impacket` |
 | **Privesc / creds** | `linpeas` · `privesc-root` · `hashcat` |
 | **RE / forensics** | `ghidra` · `pwntools` · `binwalk` · `steghide` · `wireshark` |
-| **Meta** | `review` |
+| **Meta** | `review` · `hexstrike` |
 
 ## Coordinator and workers
 
@@ -140,8 +147,10 @@ AGENTS.md                        # the canonical, runtime-agnostic agent contrac
 CLAUDE.md                        # GENERATED from AGENTS.md + Claude Code routing appendix
 .github/copilot-instructions.md  # GENERATED from AGENTS.md + a Copilot note
 .github/agents/otus.agent.md     # GENERATED coordinator; exact named-worker allowlist
-.opencode/opencode.json         # GENERATED OpenCode v2 default; no provider/model override
+.opencode/opencode.json         # GENERATED OpenCode v2 default + HexStrike MCP server (git-ignored)
 .opencode/agents/               # GENERATED primary otus + the four canonical worker adapters
+.mcp.json                        # GENERATED local Claude Code HexStrike MCP server (git-ignored)
+.claude/settings.local.json      # GENERATED local Claude Code MCP enable/allow list (git-ignored)
 .claude/skills/<tool>/SKILL.md   # one capability per tool-named folder; the runbook the agent loads
 .claude/agents/                  # recon-runner, vuln-hunter, reviewer, reporter subagents
 docs/authoring.md                # skill-authoring + verification spec, tool catalog, conventions

@@ -1,5 +1,5 @@
 ---
-description: "Executes one selected bounded web, access, privilege, AD, credential or artifact skill. Use for nuclei, sqlmap, xss, ssrf, idor, burpsuite, exploitation, ssh-foothold, metasploit, linpeas, privesc-root, netexec, bloodhound, impacket, hashcat, hydra, binwalk, steghide, wireshark, ghidra or pwntools on explicitly authorized inputs."
+description: "Executes one selected bounded web, access, privilege, AD, credential or artifact skill. Use for nuclei, sqlmap, xss, ssrf, idor, burpsuite, exploitation, ssh-foothold, metasploit, linpeas, privesc-root, netexec, bloodhound, impacket, hashcat, hydra, binwalk, steghide, wireshark, ghidra, pwntools or hexstrike on explicitly authorized inputs."
 mode: subagent
 permissions:
   - {"action": "*", "resource": "*", "effect": "deny"}
@@ -8,6 +8,10 @@ permissions:
   - {"action": "grep", "resource": "*", "effect": "allow"}
   - {"action": "glob", "resource": "*", "effect": "allow"}
   - {"action": "shell", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_nuclei_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_sqlmap_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_ffuf_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_wpscan_scan", "resource": "*", "effect": "allow"}
   - {"action": "external_directory", "resource": "*", "effect": "ask"}
   - {"action": "read", "resource": "*.env", "effect": "ask"}
   - {"action": "read", "resource": "*.env.*", "effect": "ask"}
@@ -28,6 +32,10 @@ write/edit/patch, grep, glob and shell, subject to this role's actual permission
 When this role permits commands, use the shell tool directly for OS commands, CLI tools,
 scripts and security tooling. execute is JavaScript Code Mode, NOT a shell; it is disabled
 for Otus roles. Never put shell syntax into execute or substitute another execution tool.
+Permitted HexStrike MCP tools are exposed directly (the server sets codemode:false) and are
+called by their `hexstrike_<tool>` names subject to this role's permissions; reviewer and reporter
+have none. Record each MCP call through the hexstrike skill's otus-log.py markers and saved evidence,
+never a shell wrapper or Code Mode.
 Use the repository-root workdir and foreground shell calls, non-interactive flags and closed
 stdin. Keep the existing otus-log.py wrapper, target checks and finite helper timeout/grace.
 Shell timeout is milliseconds: set it to at least (helper timeout + grace + 30) * 1000;

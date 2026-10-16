@@ -17,6 +17,7 @@ Stdlib only, no network. Run from anywhere:
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import runpy
@@ -42,6 +43,13 @@ For example, an internal IP can start with a bounded common-port scan, then a di
 it does not require public subdomain discovery or every scanner. Never silently substitute a generic
 agent when a registered role/required permission is missing. Validate discovery and tool enforcement
 offline before target work; see docs/authoring.md for runtime setup and acceptance checks.
+
+HexStrike MCP tools come from the generated `.mcp.json` (the curated set is enabled in
+`.claude/settings.local.json`). Only otus, recon-runner and vuln-hunter may call them; reviewer and
+reporter have none. Drive every call through the `hexstrike` skill so the scope gate and
+`scripts/otus-log.py` markers keep one aligned evidence trail. Both the `.mcp.json` and the OpenCode
+`.opencode/opencode.json` server entry are generated local runtime config (gitignored); regenerate
+them with `python3 -I scripts/build-runtimes.py`.
 """
 
 COPILOT_APPENDIX = """## GitHub Copilot runtime
@@ -64,6 +72,10 @@ spec in `docs/authoring.md`.
   `Shared contract: see AGENTS.md`.
 - Skills call `scripts/otus-log.py` for scope checks, raw logs, events, and rendered findings.
   Evidence uses `$OTUS_HOME` or `<repo>/out`; review/report direct-writing exceptions are above.
+- HexStrike MCP: the generated `.mcp.json` plus `.claude/settings.local.json` expose a curated HexStrike
+  tool set to otus, recon-runner and vuln-hunter (reviewer/reporter none). Run each via the `hexstrike`
+  skill so scope checks and `scripts/otus-log.py` markers record it in the same evidence trail. These
+  files are generated local runtime config (gitignored); regenerate with `python3 -I scripts/build-runtimes.py`.
 - Don't commit engagement evidence (including custom `$OTUS_HOME` roots), or real credentials or scope
   notes to tracked files.
 """
@@ -107,7 +119,91 @@ AGENT_TARGETS = {ROOT / ".github" / "agents" / "otus.agent.md": COORDINATOR_BODY
 
 WORKERS = ("recon-runner", "vuln-hunter", "reviewer", "reporter")
 CATALOG = runpy.run_path(str(ROOT / "scripts" / "build-catalog.py"))
-OPENCODE_CONFIG = {"default_agent": "otus"}
+
+# --- HexStrike AI MCP integration (one aligned evidence trail in both runtimes) ---------------
+# HexStrike runs on the engagement VM: a local HTTP engine (hexstrike_server.py) reached through the
+# stdio bridge hexstrike_mcp.py. The path/python/URL are env-parameterized placeholders resolved at
+# generation time, so no real host or filesystem path is committed. Override when regenerating, e.g.
+#   HEXSTRIKE_HOME=/home/you/hexstrike-ai python3 -I scripts/build-runtimes.py
+HEXSTRIKE_SERVER_KEY = "hexstrike"
+HEXSTRIKE_HOME = os.environ.get("HEXSTRIKE_HOME", "/opt/hexstrike-ai")
+HEXSTRIKE_PYTHON = os.environ.get("HEXSTRIKE_PYTHON", f"{HEXSTRIKE_HOME}/hexstrike-env/bin/python3")
+HEXSTRIKE_BRIDGE = os.environ.get("HEXSTRIKE_MCP", f"{HEXSTRIKE_HOME}/hexstrike_mcp.py")
+HEXSTRIKE_SERVER_URL = os.environ.get("HEXSTRIKE_SERVER", "http://127.0.0.1:8888")
+HEXSTRIKE_COMMAND = [HEXSTRIKE_PYTHON, HEXSTRIKE_BRIDGE, "--server", HEXSTRIKE_SERVER_URL]
+
+
+def _frontmatter_mcp_tools(frontmatter: str) -> list:
+  """Curated `mcp__server__tool` identifiers declared on a canonical agent's `tools:` line."""
+  match = re.search(r"^tools:\s*(.+)$", frontmatter, re.MULTILINE)
+  if not match:
+    return []
+  return [tool.strip() for tool in match.group(1).split(",") if tool.strip().startswith("mcp__")]
+
+
+def _agent_mcp_tools(name: str) -> list:
+  path = ROOT / ".claude" / "agents" / f"{name}.md"
+  if not path.exists():
+    return []
+  return _frontmatter_mcp_tools(CATALOG["_frontmatter"](path.read_text(encoding="utf-8")))
+
+
+def hexstrike_tools_for(name: str) -> list:
+  """Curated MCP tool ids for an agent; otus inherits the de-duplicated union of all workers'."""
+  if name == "otus":
+    union = {}
+    for worker in WORKERS:
+      for tool in _agent_mcp_tools(worker):
+        union[tool] = None
+    return list(union)
+  return _agent_mcp_tools(name)
+
+
+def mcp_action(tool: str) -> str:
+  """Map a Claude `mcp__server__tool` id to the OpenCode permission action `server_tool`."""
+  match = re.fullmatch(r"mcp__([A-Za-z0-9_]+)__([A-Za-z0-9_]+)", tool)
+  if not match:
+    raise ValueError(f"unsupported MCP tool entry: {tool}")
+  return f"{match.group(1)}_{match.group(2)}"
+
+
+def mcp_json() -> dict:
+  """Claude Code project MCP config (.mcp.json): stdio bridge to the local HexStrike engine."""
+  return {
+    "mcpServers": {
+      HEXSTRIKE_SERVER_KEY: {
+        "command": HEXSTRIKE_PYTHON,
+        "args": [HEXSTRIKE_BRIDGE, "--server", HEXSTRIKE_SERVER_URL],
+        "env": {},
+      },
+    },
+  }
+
+
+def claude_settings() -> dict:
+  """Claude Code local project settings: enable the HexStrike server and allow only curated tools.
+  Written to the gitignored .claude/settings.local.json so it never clobbers shared settings."""
+  return {
+    "enabledMcpjsonServers": [HEXSTRIKE_SERVER_KEY],
+    "permissions": {"allow": sorted(hexstrike_tools_for("otus"))},
+  }
+
+
+OPENCODE_CONFIG = {
+  "default_agent": "otus",
+  "mcp": {
+    "servers": {
+      HEXSTRIKE_SERVER_KEY: {
+        "type": "local",
+        "command": HEXSTRIKE_COMMAND,
+        "enabled": True,
+        # Otus roles deny `execute`/Code Mode; codemode:false exposes the curated HexStrike tools as
+        # direct tools so permitted roles can call them (otherwise MCP tools would be unreachable).
+        "codemode": False,
+      },
+    },
+  },
+}
 OPENCODE_PREAMBLE = """## OpenCode V2 Compatibility
 
 Read AGENTS.md from the repository root. Resolve inherited repository paths there; the
@@ -118,6 +214,10 @@ write/edit/patch, grep, glob and shell, subject to this role's actual permission
 When this role permits commands, use the shell tool directly for OS commands, CLI tools,
 scripts and security tooling. execute is JavaScript Code Mode, NOT a shell; it is disabled
 for Otus roles. Never put shell syntax into execute or substitute another execution tool.
+Permitted HexStrike MCP tools are exposed directly (the server sets codemode:false) and are
+called by their `hexstrike_<tool>` names subject to this role's permissions; reviewer and reporter
+have none. Record each MCP call through the hexstrike skill's otus-log.py markers and saved evidence,
+never a shell wrapper or Code Mode.
 Use the repository-root workdir and foreground shell calls, non-interactive flags and closed
 stdin. Keep the existing otus-log.py wrapper, target checks and finite helper timeout/grace.
 Shell timeout is milliseconds: set it to at least (helper timeout + grace + 30) * 1000;
@@ -172,6 +272,8 @@ def opencode_permissions(name: str, frontmatter: str = "") -> list[dict[str, str
       if tool == "Write":
         resource = {"reviewer": "out/*/*/*/review.json", "reporter": "out/*/report/*"}.get(name, "out/*")
       rules.append({"action": actions[tool], "resource": resource, "effect": "allow"})
+    elif tool.startswith("mcp__"):
+      rules.append({"action": mcp_action(tool), "resource": "*", "effect": "allow"})
     else:
       match = re.fullmatch(r"Bash\(([^)]+)\)", tool)
       if not match:
@@ -180,6 +282,8 @@ def opencode_permissions(name: str, frontmatter: str = "") -> list[dict[str, str
   if name == "otus":
     rules.extend({"action": "subagent", "resource": worker, "effect": "allow"} for worker in WORKERS)
     rules.extend({"action": action, "resource": "*", "effect": "allow"} for action in ("skill", "question"))
+    rules.extend({"action": mcp_action(tool), "resource": "*", "effect": "allow"}
+                 for tool in hexstrike_tools_for("otus"))
   rules.extend([
     {"action": "external_directory", "resource": "*", "effect": "ask"},
     {"action": "read", "resource": "*.env", "effect": "ask"},
@@ -241,6 +345,13 @@ def main() -> int:
         path.write_text(render_agent(body), encoding="utf-8")
         print(f"wrote {path.relative_to(ROOT)}")
     for path, content in opencode.items():
+      path.parent.mkdir(parents=True, exist_ok=True)
+      path.write_text(content, encoding="utf-8")
+      print(f"wrote {path.relative_to(ROOT)}")
+    for path, content in {
+        ROOT / ".mcp.json": json.dumps(mcp_json(), indent=2) + "\n",
+        ROOT / ".claude" / "settings.local.json": json.dumps(claude_settings(), indent=2) + "\n",
+    }.items():
       path.parent.mkdir(parents=True, exist_ok=True)
       path.write_text(content, encoding="utf-8")
       print(f"wrote {path.relative_to(ROOT)}")

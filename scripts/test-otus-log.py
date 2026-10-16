@@ -533,7 +533,7 @@ class WiringTests(unittest.TestCase):
         outputs = generator["opencode_outputs"]()
         self.assertEqual(len(outputs), 6)
         self.assertEqual(json.loads(outputs[repo / ".opencode/opencode.json"]),
-                         {"default_agent": "otus"})
+                         generator["OPENCODE_CONFIG"])
         for name in ("otus", *generator["WORKERS"]):
             with self.subTest(name=name):
                 rendered = outputs[repo / ".opencode/agents" / (name + ".md")]
@@ -582,11 +582,51 @@ class WiringTests(unittest.TestCase):
                     self.assertEqual(effect("edit", "out/test/nuclei/run/run.json"), "deny")
                 else:
                     self.assertEqual(effect("shell", "python3 -I scripts/otus-log.py --help"), "allow")
+                if name in ("otus", "recon-runner"):
+                    self.assertEqual(effect("hexstrike_nmap_scan", "*"), "allow")
+                if name in ("otus", "vuln-hunter"):
+                    self.assertEqual(effect("hexstrike_sqlmap_scan", "*"), "allow")
+                if name == "recon-runner":
+                    self.assertEqual(effect("hexstrike_sqlmap_scan", "*"), "deny")
+                if name == "vuln-hunter":
+                    self.assertEqual(effect("hexstrike_subfinder_scan", "*"), "deny")
+                if name in ("reviewer", "reporter"):
+                    self.assertEqual(effect("hexstrike_nmap_scan", "*"), "deny")
+                    self.assertEqual(effect("hexstrike_sqlmap_scan", "*"), "deny")
                 self.assertEqual(effect("edit", ".claude/skills/nuclei/SKILL.md"), "deny")
         self.assertEqual(outputs, generator["opencode_outputs"]())
         for appendix in (generator["CLAUDE_APPENDIX"], generator["COPILOT_APPENDIX"]):
             self.assertNotIn("Code Mode", appendix)
             self.assertNotIn("Shell timeout is milliseconds", appendix)
+
+    def test_hexstrike_mcp_is_generated_curated_and_evidence_aligned(self):
+        repo = HELPER.parent.parent
+        generator = runpy.run_path(str(repo / "scripts/build-runtimes.py"))
+        server = generator["HEXSTRIKE_SERVER_KEY"]
+        entry = generator["mcp_json"]()["mcpServers"][server]
+        self.assertTrue(entry["command"])
+        self.assertIn("--server", entry["args"])
+        oc = generator["OPENCODE_CONFIG"]["mcp"]["servers"][server]
+        self.assertEqual(oc["type"], "local")
+        self.assertIs(oc["enabled"], True)
+        self.assertIs(oc["codemode"], False)
+        settings = generator["claude_settings"]()
+        self.assertEqual(settings["enabledMcpjsonServers"], [server])
+        self.assertIn(f"mcp__{server}__nmap_scan", settings["permissions"]["allow"])
+        # curation: otus is the de-duplicated union; reviewer/reporter get none
+        self.assertEqual(generator["hexstrike_tools_for"]("reviewer"), [])
+        self.assertEqual(generator["hexstrike_tools_for"]("reporter"), [])
+        otus_tools = generator["hexstrike_tools_for"]("otus")
+        self.assertIn(f"mcp__{server}__nmap_scan", otus_tools)
+        self.assertIn(f"mcp__{server}__sqlmap_scan", otus_tools)
+        # contract + skill carry the aligned-evidence convention for both runtimes
+        contract = (repo / "AGENTS.md").read_text()
+        self.assertIn("HexStrike MCP integration", contract)
+        self.assertIn("codemode: false", contract)
+        skill = (repo / ".claude/skills/hexstrike/SKILL.md").read_text()
+        for needed in ("init --engagement", "scope-check --engagement", "run --run-dir",
+                       "finish --run-dir", "--event marker", "notes/task.md"):
+            self.assertIn(needed, skill)
 
     def test_authoring_template_and_readme_use_real_bounded_ownership(self):
         repo = HELPER.parent.parent
@@ -892,7 +932,7 @@ class WiringTests(unittest.TestCase):
 
     def test_all_skills_use_helper_and_versioned_scope(self):
         skills = list((HELPER.parent.parent / ".claude/skills").glob("*/SKILL.md"))
-        self.assertEqual(len(skills), 26)
+        self.assertEqual(len(skills), 27)
         for path in skills:
             with self.subTest(skill=path.parent.name):
                 text = path.read_text()

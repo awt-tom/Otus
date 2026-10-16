@@ -3,7 +3,7 @@
 
 # Otus skill catalog
 
-26 skills, each a flat runbook at `.claude/skills/<tool>/SKILL.md`. This index is generated from skill frontmatter — see `docs/authoring.md` to add one.
+27 skills, each a flat runbook at `.claude/skills/<tool>/SKILL.md`. This index is generated from skill frontmatter — see `docs/authoring.md` to add one.
 
 ## By function
 
@@ -54,6 +54,7 @@ Grouped by `category`; each row is **name** — description — _(domain)_.
 
 ### meta
 
+- **hexstrike** — Use when running ONE specific authorized HexStrike AI MCP tool (the hexstrike_mcp.py stdio bridge to the local hexstrike_server.py engine) — nmap_scan, nuclei_scan, ffuf_scan, sqlmap_scan, etc. — and recording it in the Otus evidence trail. Call the exact curated tool, never the ~150-tool catalog. Not for direct-CLI control with full flags (use port-scanner, nuclei, ffuf, sqlmap for that). _(misc)_
 - **review** — Use after a terminal skill or report run to independently verify its declared profile, actual evidence, coverage and conditional proof claims. Read-only verification requests permitted local repairs from the coordinator, never replays target actions. Trigger with "review", "verify", "did it finish", or "check the <skill> run". _(misc)_
 
 ## By domain
@@ -108,4 +109,5 @@ Grouped by `domain`; each row is **name** — description — _(category)_.
 
 ### misc
 
+- **hexstrike** — Use when running ONE specific authorized HexStrike AI MCP tool (the hexstrike_mcp.py stdio bridge to the local hexstrike_server.py engine) — nmap_scan, nuclei_scan, ffuf_scan, sqlmap_scan, etc. — and recording it in the Otus evidence trail. Call the exact curated tool, never the ~150-tool catalog. Not for direct-CLI control with full flags (use port-scanner, nuclei, ffuf, sqlmap for that). _(meta)_
 - **review** — Use after a terminal skill or report run to independently verify its declared profile, actual evidence, coverage and conditional proof claims. Read-only verification requests permitted local repairs from the coordinator, never replays target actions. Trigger with "review", "verify", "did it finish", or "check the <skill> run". _(meta)_

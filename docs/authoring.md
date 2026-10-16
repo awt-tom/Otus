@@ -173,7 +173,7 @@ then actual role registration, parent agent tool, skill frontmatter and resolved
 Supported VS Code can load `.claude/agents/*.md` directly; absence of duplicated `.github` worker files
 is not proof of failure. The generated `.github/agents/otus.agent.md` is the coordinator entrypoint.
 
-1. Refresh discovery using the installed runtime's supported UI/diagnostics. Confirm all 26 skill
+1. Refresh discovery using the installed runtime's supported UI/diagnostics. Confirm all 27 skill
   names and exact four worker names, not merely files. Verify the coordinator's agent tool/allowlist.
 2. Invoke each exact named role with an offline-read-only setup task: read its definition/contract,
   return registered identity and actual available tools, no shell/targets/writes/delegation. At most
@@ -243,6 +243,25 @@ Official v2 references: [agents](https://opencode.ai/v2/docs/agents),
 [skills](https://opencode.ai/v2/docs/skills), [config](https://opencode.ai/v2/docs/config) and
 [instructions](https://opencode.ai/v2/docs/instructions). Recheck these against the installed version.
 
+### 3.3.1 HexStrike MCP server config
+
+`scripts/build-runtimes.py` also emits the HexStrike AI MCP wiring from one definition so both runtimes
+stay aligned: Claude Code `.mcp.json` (stdio bridge `hexstrike_mcp.py --server <url>`), the OpenCode
+`.opencode/opencode.json` `mcp.servers.hexstrike` entry, and `.claude/settings.local.json`. All three
+are generated local runtime config (gitignored, like `.opencode/opencode.json`); regenerate them per
+environment. The bridge path/python/URL come from `HEXSTRIKE_HOME`, `HEXSTRIKE_PYTHON` and
+`HEXSTRIKE_SERVER` (placeholder defaults `/opt/hexstrike-ai`, `.../hexstrike-env/bin/python3`,
+`http://127.0.0.1:8888`) resolved at generation time, so no real host/path is committed.
+
+The OpenCode server sets `codemode: false` because every Otus role denies `execute`/Code Mode; without
+it OpenCode would route MCP tools through Code Mode and they would be unreachable. Access is curated:
+each worker's canonical `tools:` frontmatter lists its `mcp__hexstrike__<tool>` set (Claude Code), which
+the generator maps to OpenCode `<server>_<tool>` allow rules; `otus` inherits the union; `reviewer` and
+`reporter` get none. Widen only by editing that frontmatter and regenerating. HexStrike tool calls are
+not shell commands the helper can wrap — they run through the `hexstrike` skill, which `scope-check`s the
+target, records each call with `otus-log.py event --event marker`, and saves raw output under `evidence/`,
+producing one evidence trail identical in both runtimes. Verify with `python3 -I scripts/test-otus-log.py`.
+
 ### 3.4 Kali dual-runtime acceptance
 
 Run the local synthetic suite and generator consistency checks first. Then the operator runs all
@@ -259,7 +278,7 @@ without selecting the currently assigned instance; no target contact is needed f
 3. **Named delegation:** `otus` actually launches exact `recon-runner` with one bounded port-scanner
   profile and inherited inputs, awaits its terminal handback, then invokes the independent reviewer.
   File presence or an Explore/general substitute cannot satisfy registration.
-4. **Shared skills:** both runtimes discover all 26 IDs and read the same canonical skill paths/bodies.
+4. **Shared skills:** both runtimes discover all 27 IDs and read the same canonical skill paths/bodies.
   No duplicate skill directory or provider-specific corpus; Claude fork metadata is not v2 routing.
 5. **No authorization prerequisite:** in an isolated evidence root, a target-only task automatically
   binds scope and starts permitted work with no authorizer declaration, record or confirmation flag.

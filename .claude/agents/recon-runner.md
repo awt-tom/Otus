@@ -4,7 +4,7 @@ description: >
   Executes one selected bounded subfinder, httpx, port-scanner or ffuf skill.
   Use for authorized asset discovery, HTTP probing, port/service scanning and
   content discovery, then return evidence and a proposed next step to the coordinator.
-tools: Read, Write, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash, mcp__hexstrike__nmap_scan, mcp__hexstrike__subfinder_scan, mcp__hexstrike__ffuf_scan, mcp__hexstrike__gobuster_scan, mcp__hexstrike__katana_crawl
 model: inherit
 effort: low
 ---

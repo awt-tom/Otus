@@ -14,6 +14,14 @@ permissions:
   - {"action": "subagent", "resource": "reporter", "effect": "allow"}
   - {"action": "skill", "resource": "*", "effect": "allow"}
   - {"action": "question", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_nmap_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_subfinder_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_ffuf_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_gobuster_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_katana_crawl", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_nuclei_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_sqlmap_scan", "resource": "*", "effect": "allow"}
+  - {"action": "hexstrike_wpscan_scan", "resource": "*", "effect": "allow"}
   - {"action": "external_directory", "resource": "*", "effect": "ask"}
   - {"action": "read", "resource": "*.env", "effect": "ask"}
   - {"action": "read", "resource": "*.env.*", "effect": "ask"}
@@ -34,6 +42,10 @@ write/edit/patch, grep, glob and shell, subject to this role's actual permission
 When this role permits commands, use the shell tool directly for OS commands, CLI tools,
 scripts and security tooling. execute is JavaScript Code Mode, NOT a shell; it is disabled
 for Otus roles. Never put shell syntax into execute or substitute another execution tool.
+Permitted HexStrike MCP tools are exposed directly (the server sets codemode:false) and are
+called by their `hexstrike_<tool>` names subject to this role's permissions; reviewer and reporter
+have none. Record each MCP call through the hexstrike skill's otus-log.py markers and saved evidence,
+never a shell wrapper or Code Mode.
 Use the repository-root workdir and foreground shell calls, non-interactive flags and closed
 stdin. Keep the existing otus-log.py wrapper, target checks and finite helper timeout/grace.
 Shell timeout is milliseconds: set it to at least (helper timeout + grace + 30) * 1000;
